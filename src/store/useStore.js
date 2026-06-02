@@ -109,17 +109,31 @@ export const useStore = create((set, get) => ({
   updater: { status: 'idle', info: null, progress: null, installerPath: null, error: null },
   setUpdater: (patch) => set((s) => ({ updater: { ...s.updater, ...patch } })),
 
-  checkForUpdates: async ({ force = false } = {}) => {
+  // Auto-update check.
+  //
+  //   opts.force  — bypass the 24h server-side debounce
+  //   opts.silent — for the automatic startup check: don't broadcast
+  //                 'checking' or 'no-update' status (so users don't get a
+  //                 "you're up to date" toast every launch). Only surfaces
+  //                 an 'available' update or stays silent.
+  //
+  // The Settings panel's "Check now" button always passes silent=false so
+  // its inline status indicator actually shows something — that was the
+  // "Check now gives no feedback" bug.
+  checkForUpdates: async ({ force = false, silent = false } = {}) => {
     if (!v || !v.updater) return;
-    set((s) => ({ updater: { ...s.updater, status: 'checking', error: null } }));
+    if (!silent) set((s) => ({ updater: { ...s.updater, status: 'checking', error: null } }));
     const result = await v.updater.check({ force });
     if (!result.ok) {
+      if (silent) return result;
       set({ updater: { status: 'error', info: null, progress: null, installerPath: null, error: result.error } });
       return result;
     }
     if (result.hasUpdate && !result.dismissed) {
+      // Always surface an available update, even when silent — that's the
+      // whole point of background checking.
       set({ updater: { status: 'available', info: result, progress: null, installerPath: null, error: null } });
-    } else {
+    } else if (!silent) {
       set({ updater: { status: 'no-update', info: result, progress: null, installerPath: null, error: null } });
     }
     return result;

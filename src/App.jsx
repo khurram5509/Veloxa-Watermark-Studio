@@ -42,10 +42,12 @@ function useEngineWiring() {
 
       // Background update check (v2.5.0). Respects the user's preference and
       // the daily debounce stamped into settings.lastUpdateCheckMs.
+      // silent=true so users don't get a "you're up to date" toast on every
+      // launch — only an actual available update shows the banner.
       const cfg = useStore.getState().settings;
       if (cfg && cfg.checkForUpdates !== 'never' && cfg.checkForUpdates !== 'manual') {
         // Delay 2s so we don't compete with the renderer's first paint.
-        setTimeout(() => { checkForUpdates({ force: false }).catch(() => {}); }, 2000);
+        setTimeout(() => { checkForUpdates({ force: false, silent: true }).catch(() => {}); }, 2000);
       }
     })();
 

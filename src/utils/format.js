@@ -34,3 +34,27 @@ export function ext(p) {
   const i = b.lastIndexOf('.');
   return i >= 0 ? b.slice(i).toLowerCase() : '';
 }
+
+/**
+ * Humanize a past timestamp into "Just now", "5 minutes ago", "2 hours ago",
+ * "Yesterday", "3 days ago", or a locale date string for older dates.
+ * Returns 'Never' for null/undefined/0.
+ */
+export function relativeTime(ts) {
+  if (!ts) return 'Never';
+  const now = Date.now();
+  const diff = now - ts;
+  if (diff < 0) return new Date(ts).toLocaleString(); // future timestamps fall through
+  const sec = Math.floor(diff / 1000);
+  if (sec < 45) return 'Just now';
+  const min = Math.floor(sec / 60);
+  if (min < 2) return '1 minute ago';
+  if (min < 60) return `${min} minutes ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 2) return '1 hour ago';
+  if (hr < 24) return `${hr} hours ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 2) return 'Yesterday';
+  if (day < 7) return `${day} days ago`;
+  return new Date(ts).toLocaleDateString();
+}
