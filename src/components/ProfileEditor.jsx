@@ -5,21 +5,29 @@ import { useStore } from '../store/useStore';
 import LogoLibrary from './LogoLibrary';
 
 const POSITION_PLACEMENT = {
-  'top-left':     { items: 'flex-start',  justify: 'flex-start' },
-  'top-right':    { items: 'flex-start',  justify: 'flex-end'   },
-  'bottom-left':  { items: 'flex-end',    justify: 'flex-start' },
-  'bottom-right': { items: 'flex-end',    justify: 'flex-end'   },
-  'center':       { items: 'center',      justify: 'center'     },
-  'diagonal':     { items: 'center',      justify: 'center'     },
+  'top-left':      { items: 'flex-start',  justify: 'flex-start' },
+  'top-center':    { items: 'flex-start',  justify: 'center'     },
+  'top-right':     { items: 'flex-start',  justify: 'flex-end'   },
+  'middle-left':   { items: 'center',      justify: 'flex-start' },
+  'middle-right':  { items: 'center',      justify: 'flex-end'   },
+  'bottom-left':   { items: 'flex-end',    justify: 'flex-start' },
+  'bottom-center': { items: 'flex-end',    justify: 'center'     },
+  'bottom-right':  { items: 'flex-end',    justify: 'flex-end'   },
+  'center':        { items: 'center',      justify: 'center'     },
+  'diagonal':      { items: 'center',      justify: 'center'     },
 };
 
-const POSITIONS = [
-  { v: 'top-left', label: 'Top left' },
-  { v: 'top-right', label: 'Top right' },
-  { v: 'bottom-left', label: 'Bottom left' },
-  { v: 'bottom-right', label: 'Bottom right' },
-  { v: 'center', label: 'Center' },
-  { v: 'diagonal', label: 'Diagonal' },
+// The 9 cells of the 3×3 position grid, laid out in display order.
+const POSITION_GRID = [
+  { v: 'top-left',      label: 'Top left' },
+  { v: 'top-center',    label: 'Top center' },
+  { v: 'top-right',     label: 'Top right' },
+  { v: 'middle-left',   label: 'Middle left' },
+  { v: 'center',        label: 'Center' },
+  { v: 'middle-right',  label: 'Middle right' },
+  { v: 'bottom-left',   label: 'Bottom left' },
+  { v: 'bottom-center', label: 'Bottom center' },
+  { v: 'bottom-right',  label: 'Bottom right' },
 ];
 
 const FONTS = ['Helvetica', 'Arial', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana'];
@@ -383,20 +391,39 @@ export default function ProfileEditor() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <div className="label">Position</div>
-                  <select className="select" value={draft.position}
-                          onChange={(e) => {
-                            const next = e.target.value;
-                            // UX: when picking "diagonal" with a flat watermark,
-                            // tilt to -30° automatically so it actually looks diagonal.
-                            if (next === 'diagonal' && (!draft.rotation || draft.rotation === 0)) {
-                              update({ position: next, rotation: -30 });
-                            } else {
-                              update({ position: next });
-                            }
-                          }}>
-                    {POSITIONS.map((p) => <option key={p.v} value={p.v}>{p.label}</option>)}
-                  </select>
+                  <div className="label flex items-center justify-between">
+                    <span>Position</span>
+                    {/* Diagonal mode is rotation-driven and lives outside the 3×3
+                        grid; surface it as a small toggle next to the label. */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = draft.position === 'diagonal' ? 'center' : 'diagonal';
+                        if (next === 'diagonal' && (!draft.rotation || draft.rotation === 0)) {
+                          update({ position: next, rotation: -30 });
+                        } else {
+                          update({ position: next });
+                        }
+                      }}
+                      className={`text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full border transition-colors ${
+                        draft.position === 'diagonal'
+                          ? 'border-veloxa-500/60 bg-veloxa-600/20 text-veloxa-200'
+                          : 'border-ink-500/40 text-muted hover:text-ink-100 hover:border-ink-400/50'
+                      }`}
+                      title="Toggle diagonal mode (center + auto-rotation)"
+                    >
+                      Diagonal
+                    </button>
+                  </div>
+                  <PositionGrid
+                    value={draft.position}
+                    onChange={(next) => {
+                      // Switching out of diagonal back to a grid cell should not
+                      // drag the -30° auto-rotation along; leave rotation as-is
+                      // since users often want to keep their chosen angle.
+                      update({ position: next });
+                    }}
+                  />
                 </div>
                 <div>
                   <div className="label">Margin (pt)</div>
@@ -650,6 +677,52 @@ function ConvertToPdfToggle({ value, onChange, converter, quality, onQualityChan
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 3×3 grid position picker — replaces the old "Position" dropdown.
+ *
+ * Each cell maps to one of the engine's 9 placement keys (top-left through
+ * bottom-right plus center). Clicking a cell selects it and the rest of the
+ * editor (live preview + saved profile) updates accordingly. Diagonal is
+ * surfaced as a pill toggle next to the label since it's a rotation mode,
+ * not a real grid position.
+ */
+function PositionGrid({ value, onChange }) {
+  const isDiagonal = value === 'diagonal';
+  return (
+    <div className="grid grid-cols-3 gap-1.5 p-1.5 rounded-lg border border-ink-500/40 bg-ink-700/30">
+      {POSITION_GRID.map((cell) => {
+        const selected = cell.v === value || (cell.v === 'center' && isDiagonal);
+        return (
+          <button
+            key={cell.v}
+            type="button"
+            onClick={() => onChange(cell.v)}
+            title={cell.label}
+            aria-label={cell.label}
+            aria-pressed={selected}
+            className={`group relative aspect-square rounded-md border transition-all ${
+              selected
+                ? 'border-veloxa-500 bg-veloxa-600/25 shadow-glow'
+                : 'border-ink-500/40 hover:border-veloxa-500/60 hover:bg-veloxa-600/10'
+            }`}
+          >
+            <span
+              className={`absolute w-1.5 h-1.5 rounded-full ${
+                selected ? 'bg-veloxa-300' : 'bg-ink-400/60 group-hover:bg-veloxa-400/80'
+              }`}
+              style={{
+                top:  cell.v.startsWith('top-')    ? '20%' : cell.v.startsWith('bottom-') ? '80%' : '50%',
+                left: cell.v.endsWith('-left')     ? '20%' : cell.v.endsWith('-right')   ? '80%' : '50%',
+                transform: 'translate(-50%, -50%)',
+              }}
+            />
+          </button>
+        );
+      })}
     </div>
   );
 }

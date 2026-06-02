@@ -276,6 +276,47 @@ function registerIpcHandlers({ getMainWindow }) {
     return { ok: true };
   });
 
+  // ---- File-size lookup (v2.6.0: Dashboard size summary) ----
+  // Batched so the renderer can ask once instead of N IPC calls.
+  ipcMain.handle('app:getFileSizes', async (_e, paths) => {
+    if (!Array.isArray(paths)) return {};
+    const sizes = {};
+    await Promise.all(paths.map(async (p) => {
+      try {
+        const st = await fsp.stat(p);
+        sizes[p] = st.size;
+      } catch {
+        sizes[p] = null;
+      }
+    }));
+    return sizes;
+  });
+
+  // ---- System info for Performance Advisor (v2.6.0) ----
+  ipcMain.handle('app:getSystemInfo', async () => {
+    const os = require('node:os');
+    const cpus = os.cpus() || [];
+    const cpuCores = cpus.length;
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const totalRamGb = Math.round((totalMem / (1024 ** 3)) * 10) / 10;
+    const freeRamGb = Math.round((freeMem / (1024 ** 3)) * 10) / 10;
+    const cpuModel = cpus[0] ? cpus[0].model : 'Unknown';
+    // Recommended concurrency: leave 2 cores for OS/UI, cap at 8 (diminishing
+    // returns past that for the kind of work we do — most PDFs serialize on
+    // pdf-lib's single-threaded zlib).
+    const recommendedConcurrent = Math.max(2, Math.min(8, cpuCores - 2));
+    return {
+      cpuCores,
+      cpuModel,
+      totalRamGb,
+      freeRamGb,
+      platform: process.platform,
+      arch: process.arch,
+      recommendedConcurrent,
+    };
+  });
+
   // ---- Orphan-logo cleanup (Tier 1 #3) ----
   ipcMain.handle('app:cleanupOrphanLogos', async () => {
     try {

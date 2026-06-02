@@ -28,21 +28,31 @@ function placeShape({ position, marginEmu, offsetXEmu = 0, offsetYEmu = 0 }, sli
   const cxClamped = Math.min(cx, slideW);
   const cyClamped = Math.min(cy, slideH);
   let base;
+  const cx_centered = Math.round((slideW - cxClamped) / 2);
+  const cy_centered = Math.round((slideH - cyClamped) / 2);
   switch (position) {
     case 'top-left':
       base = { x: marginEmu, y: marginEmu, anchor: 't', algn: 'l' }; break;
+    case 'top-center':
+      base = { x: cx_centered, y: marginEmu, anchor: 't', algn: 'ctr' }; break;
     case 'top-right':
       base = { x: slideW - cxClamped - marginEmu, y: marginEmu, anchor: 't', algn: 'r' }; break;
+    case 'middle-left':
+      base = { x: marginEmu, y: cy_centered, anchor: 'ctr', algn: 'l' }; break;
+    case 'middle-right':
+      base = { x: slideW - cxClamped - marginEmu, y: cy_centered, anchor: 'ctr', algn: 'r' }; break;
     case 'bottom-left':
       base = { x: marginEmu, y: slideH - cyClamped - marginEmu, anchor: 'b', algn: 'l' }; break;
+    case 'bottom-center':
+      base = { x: cx_centered, y: slideH - cyClamped - marginEmu, anchor: 'b', algn: 'ctr' }; break;
     case 'bottom-right':
       base = { x: slideW - cxClamped - marginEmu, y: slideH - cyClamped - marginEmu, anchor: 'b', algn: 'r' }; break;
     case 'diagonal':
     case 'center':
     default:
       base = {
-        x: Math.round((slideW - cxClamped) / 2),
-        y: Math.round((slideH - cyClamped) / 2),
+        x: cx_centered,
+        y: cy_centered,
         anchor: 'ctr',
         algn: 'ctr',
       };
@@ -51,7 +61,12 @@ function placeShape({ position, marginEmu, offsetXEmu = 0, offsetYEmu = 0 }, sli
 }
 
 function shapeSize(profile, slideW, slideH, kind, imgWidth, imgHeight) {
-  const isCorner = ['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(profile.position);
+  // "Compact" positions — every cell of the 3×3 grid except the actual center.
+  const isCorner = [
+    'top-left', 'top-center', 'top-right',
+    'middle-left', 'middle-right',
+    'bottom-left', 'bottom-center', 'bottom-right',
+  ].includes(profile.position);
   const scale = profile.scale || 1;
   if (kind === 'text') {
     // Corners get a tighter box; center/diagonal gets a wide box for big text

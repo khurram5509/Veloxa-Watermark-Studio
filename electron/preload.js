@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld('veloxa', {
     deleteLogo: (p) => invoke('app:deleteLogo', p),
     cleanupOrphanLogos: () => invoke('app:cleanupOrphanLogos'),
     checkConverter: (refresh) => invoke('app:checkConverter', !!refresh),
+    getFileSizes: (paths) => invoke('app:getFileSizes', paths || []),
+    getSystemInfo: () => invoke('app:getSystemInfo'),
   },
 
   // File scanning

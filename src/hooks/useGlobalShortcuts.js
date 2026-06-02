@@ -82,10 +82,30 @@ export function useGlobalShortcuts({ onProcess }) {
       }
 
       // ── Process / queue control ────────────────────────────────────
-      // Ctrl+Enter → PROCESS
+      // Ctrl+Enter → PROCESS (kept for muscle-memory parity with file-pickers)
       if (meta && e.key === 'Enter') {
         e.preventDefault();
         onProcess?.();
+        return;
+      }
+      // Ctrl+P → PROCESS (matches what the on-screen button says)
+      if (meta && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        onProcess?.();
+        return;
+      }
+      // Ctrl+F → Focus the profile search input (jumps to Profiles tab first
+      // so the search box exists in the DOM). The input is tagged with
+      // data-search-input so we can find it without component coupling.
+      if (meta && !e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        s.setView('profiles');
+        // The search input mounts on the next frame after setView; defer a
+        // tick so focus actually lands.
+        setTimeout(() => {
+          const el = document.querySelector('[data-search-input]');
+          if (el) { el.focus(); el.select && el.select(); }
+        }, 30);
         return;
       }
       // Ctrl+Space → Pause/Resume

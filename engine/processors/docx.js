@@ -62,12 +62,28 @@ function computePosition({ position, pageW, pageH, wmW, wmH, margin, offsetX, of
       left = m;
       top = m;
       break;
+    case 'top-center':
+      left = (pageW - wmW) / 2;
+      top = m;
+      break;
     case 'top-right':
       left = pageW - wmW - m;
       top = m;
       break;
+    case 'middle-left':
+      left = m;
+      top = (pageH - wmH) / 2;
+      break;
+    case 'middle-right':
+      left = pageW - wmW - m;
+      top = (pageH - wmH) / 2;
+      break;
     case 'bottom-left':
       left = m;
+      top = pageH - wmH - m;
+      break;
+    case 'bottom-center':
+      left = (pageW - wmW) / 2;
       top = pageH - wmH - m;
       break;
     case 'bottom-right':
@@ -97,7 +113,13 @@ function buildTextWatermarkVml(profile, pageSize) {
   const bold = profile.bold ? 'bold' : 'normal';
   const italic = profile.italic ? 'italic' : 'normal';
   const fontFamily = profile.fontFamily || 'Arial';
-  const isCorner = ['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(profile.position);
+  // "Compact" positions — every cell of the 3×3 grid except the actual center.
+  // These get the small watermark size so corner+edge marks don't overflow.
+  const isCorner = [
+    'top-left', 'top-center', 'top-right',
+    'middle-left', 'middle-right',
+    'bottom-left', 'bottom-center', 'bottom-right',
+  ].includes(profile.position);
   const widthPt = isCorner ? 240 : 468;
   const heightPt = isCorner ? 80 : 200;
   const { marginLeft, marginTop } = computePosition({
@@ -147,7 +169,13 @@ function buildImageWatermarkVml(profile, relId, imgWidth, imgHeight, pageSize) {
   const opacityPct = Math.max(0, Math.min(1, profile.opacity ?? 1));
   const rotation = profile.rotation ?? 0;
   const scale = profile.scale || 1;
-  const isCorner = ['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(profile.position);
+  // "Compact" positions — every cell of the 3×3 grid except the actual center.
+  // These get the small watermark size so corner+edge marks don't overflow.
+  const isCorner = [
+    'top-left', 'top-center', 'top-right',
+    'middle-left', 'middle-right',
+    'bottom-left', 'bottom-center', 'bottom-right',
+  ].includes(profile.position);
   // Preserve the source image's aspect ratio. If we couldn't read dimensions,
   // fall back to a sane default (~3:2 landscape).
   const aspect = (imgWidth && imgHeight) ? (imgHeight / imgWidth) : (2 / 3);

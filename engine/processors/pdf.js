@@ -71,13 +71,17 @@ function placement(position, w, h, tw, th, margin, offsetX = 0, offsetY = 0) {
   const cy = h / 2 - th / 2;
   let base;
   switch (position) {
-    case 'top-left':     base = { x: margin,           y: h - margin - th }; break;
-    case 'top-right':    base = { x: w - margin - tw,  y: h - margin - th }; break;
-    case 'bottom-left':  base = { x: margin,           y: margin };          break;
-    case 'bottom-right': base = { x: w - margin - tw,  y: margin };          break;
+    case 'top-left':      base = { x: margin,           y: h - margin - th }; break;
+    case 'top-center':    base = { x: cx,               y: h - margin - th }; break;
+    case 'top-right':     base = { x: w - margin - tw,  y: h - margin - th }; break;
+    case 'middle-left':   base = { x: margin,           y: cy };               break;
+    case 'middle-right':  base = { x: w - margin - tw,  y: cy };               break;
+    case 'bottom-left':   base = { x: margin,           y: margin };          break;
+    case 'bottom-center': base = { x: cx,               y: margin };          break;
+    case 'bottom-right':  base = { x: w - margin - tw,  y: margin };          break;
     case 'diagonal':
     case 'center':
-    default:             base = { x: cx, y: cy };
+    default:              base = { x: cx, y: cy };
   }
   return { x: base.x + offsetX, y: base.y - offsetY };
 }

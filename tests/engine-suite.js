@@ -181,7 +181,41 @@ await test('PDF pages=custom "1,3" + "2-3" + "999" (OOB tolerated)', async () =>
 });
 
 // =====================================================================
+header('2b. PDF processor — 4 new edge positions (v2.6.0)');
+const newPositions = ['top-center', 'middle-left', 'middle-right', 'bottom-center'];
+for (const pos of newPositions) {
+  await test(`PDF ${pos} (new in v2.6.0)`, async () => {
+    const out = path.join(tmp, `pdf_new_${pos}.pdf`);
+    await processPdf({ inputPath: blankPdf3, outputPath: out,
+      profile: { name: 'P', type: 'text', text: 'X', position: pos, opacity: 0.5,
+        fontFamily: 'Arial', fontSize: 36, margin: 36 }, settings: {} });
+    if (fs.readFileSync(out).slice(0,5).toString() !== '%PDF-') throw new Error('not PDF');
+  });
+}
+
+// =====================================================================
 header('3. DOCX processor — page-edge absolute positioning + all paper sizes');
+// New edge positions are exercised here too — assert specific coords.
+for (const pos of newPositions) {
+  await test(`DOCX ${pos} produces correct margin-* coords`, async () => {
+    const out = path.join(tmp, `docx_new_${pos}.docx`);
+    await processDocx({ inputPath: blankDocx, outputPath: out,
+      profile: { name: 'P', type: 'text', text: 'X', position: pos, margin: 48 } });
+    const hdr = new PizZip(fs.readFileSync(out)).file('word/header_veloxa.xml').asText();
+    const mL = parseFloat(hdr.match(/margin-left:([-\d.]+)pt/)[1]);
+    const mT = parseFloat(hdr.match(/margin-top:([-\d.]+)pt/)[1]);
+    // Page = 612×792 Letter, wmW=240 wmH=80 (compact corner sizes), margin=48
+    const expected = {
+      'top-center':    { L: (612 - 240) / 2, T: 48 },
+      'middle-left':   { L: 48, T: (792 - 80) / 2 },
+      'middle-right':  { L: 612 - 240 - 48, T: (792 - 80) / 2 },
+      'bottom-center': { L: (612 - 240) / 2, T: 792 - 80 - 48 },
+    }[pos];
+    if (Math.abs(mL - expected.L) > 0.1) throw new Error(`L wrong: ${mL} (want ${expected.L})`);
+    if (Math.abs(mT - expected.T) > 0.1) throw new Error(`T wrong: ${mT} (want ${expected.T})`);
+  });
+}
+
 for (const pos of presets) {
   for (const type of types) {
     await test(`DOCX ${pos} ${type}`, async () => {

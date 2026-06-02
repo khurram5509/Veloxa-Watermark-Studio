@@ -139,6 +139,7 @@ export default function ProfilesPanel({ compact = false }) {
             onChange={(e) => setQuery(e.target.value)}
             placeholder={`Search ${profiles.length} profile${profiles.length === 1 ? '' : 's'}...`}
             className="input pl-8 pr-7 py-1.5 text-xs"
+            data-search-input
           />
           {query && (
             <button

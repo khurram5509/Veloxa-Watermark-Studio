@@ -4,11 +4,11 @@
 
 A premium, offline desktop tool for unattended bulk watermarking of PDF, DOCX, and PPTX files. Drag in files or entire folders, pick a profile, hit **PROCESS** — Veloxa scans, watermarks, and writes the outputs in parallel via real worker threads, without ever touching the originals.
 
-> **Current version: 2.5.3** — fixes the auto-update install flow (SmartScreen no longer blocks; runs silently and relaunches the app).
+> **Current version: 2.6.0** — UX upgrade: format pills + size/ETA on the drop zone, 3×3 grid position selector with 4 new positions, hardware-aware performance advisor, two new shortcuts (Ctrl+P process, Ctrl+F search).
 
 ## Download
 
-Latest installer: **[VeloxaWatermarkStudio-Setup-2.5.3.exe](https://github.com/khurram5509/Veloxa-Watermark-Studio/releases/latest)** (81.8 MB, Windows 10/11 x64, per-user install — no admin rights needed).
+Latest installer: **[VeloxaWatermarkStudio-Setup-2.6.0.exe](https://github.com/khurram5509/Veloxa-Watermark-Studio/releases/latest)** (81.8 MB, Windows 10/11 x64, per-user install — no admin rights needed).
 
 The app checks for new versions automatically once per day (silently — no "you're up to date" toast every launch). You can trigger a manual check or disable auto-checks from **Settings → Updates**.
 

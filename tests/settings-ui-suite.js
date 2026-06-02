@@ -187,6 +187,66 @@ await test('preload exposes revealInstaller', () => {
 });
 
 // =====================================================================
+header('6. v2.6.0 UI improvements');
+const dropZoneSrc = fs.readFileSync(path.join(PROJ, 'src', 'components', 'DropZone.jsx'), 'utf8');
+const editorSrc = fs.readFileSync(path.join(PROJ, 'src', 'components', 'ProfileEditor.jsx'), 'utf8');
+const settingsSrc = fs.readFileSync(path.join(PROJ, 'src', 'components', 'SettingsPanel.jsx'), 'utf8');
+const shortcutsSrc = fs.readFileSync(path.join(PROJ, 'src', 'hooks', 'useGlobalShortcuts.js'), 'utf8');
+const preloadSrc2 = fs.readFileSync(path.join(PROJ, 'electron', 'preload.js'), 'utf8');
+const ipcSrc2 = fs.readFileSync(path.join(PROJ, 'electron', 'ipc-handlers.js'), 'utf8');
+
+await test('DropZone: empty state has format pills', () => {
+  for (const label of ['PDF', 'DOCX', 'PPTX', 'Folder Processing', 'Recursive Scanning']) {
+    if (!dropZoneSrc.includes(`label: '${label}'`)) throw new Error(`pill missing: ${label}`);
+  }
+});
+await test('DropZone: shows StatTile with count + size + ETA', () => {
+  if (!/StatTile/.test(dropZoneSrc)) throw new Error('StatTile component missing');
+  if (!/Est\. time|Estimated/.test(dropZoneSrc)) throw new Error('ETA tile missing');
+  if (!/Total size/.test(dropZoneSrc)) throw new Error('Total size tile missing');
+});
+await test('DropZone: batched getFileSizes IPC call', () => {
+  if (!/v\.app\.getFileSizes/.test(dropZoneSrc)) throw new Error('getFileSizes IPC not called');
+});
+await test('IPC: app:getFileSizes handler', () => {
+  if (!ipcSrc2.includes("'app:getFileSizes'")) throw new Error('handler missing');
+});
+await test('IPC: app:getSystemInfo handler returns cpuCores + totalRamGb + recommendedConcurrent', () => {
+  if (!ipcSrc2.includes("'app:getSystemInfo'")) throw new Error('handler missing');
+  for (const field of ['cpuCores', 'cpuModel', 'totalRamGb', 'freeRamGb', 'recommendedConcurrent']) {
+    if (!ipcSrc2.includes(field)) throw new Error(`field missing: ${field}`);
+  }
+});
+await test('preload exposes getFileSizes + getSystemInfo', () => {
+  if (!/getFileSizes:/.test(preloadSrc2)) throw new Error('getFileSizes not exposed');
+  if (!/getSystemInfo:/.test(preloadSrc2)) throw new Error('getSystemInfo not exposed');
+});
+await test('ProfileEditor: PositionGrid component + 9-cell grid array', () => {
+  if (!/function PositionGrid/.test(editorSrc)) throw new Error('PositionGrid component missing');
+  if (!/POSITION_GRID/.test(editorSrc)) throw new Error('POSITION_GRID array missing');
+  for (const p of ['top-left', 'top-center', 'top-right', 'middle-left', 'center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right']) {
+    if (!editorSrc.includes(`v: '${p}'`)) throw new Error(`grid cell missing: ${p}`);
+  }
+});
+await test('SettingsPanel: PerformanceSection has hardware advisor', () => {
+  if (!/function PerformanceSection/.test(settingsSrc)) throw new Error('PerformanceSection missing');
+  if (!/HardwareTile/.test(settingsSrc)) throw new Error('HardwareTile missing');
+  if (!/Recommended/.test(settingsSrc)) throw new Error('Recommended tile label missing');
+  if (!/getSystemInfo/.test(settingsSrc)) throw new Error('does not call getSystemInfo');
+});
+await test('Shortcuts: Ctrl+P fires onProcess', () => {
+  if (!/e\.key === 'p' \|\| e\.key === 'P'/.test(shortcutsSrc)) throw new Error('Ctrl+P missing');
+});
+await test('Shortcuts: Ctrl+F focuses [data-search-input]', () => {
+  if (!/e\.key === 'f' \|\| e\.key === 'F'/.test(shortcutsSrc)) throw new Error('Ctrl+F missing');
+  if (!/data-search-input/.test(shortcutsSrc)) throw new Error('search input selector missing');
+});
+await test('ProfilesPanel: search input has data-search-input attribute', () => {
+  const profilesSrc = fs.readFileSync(path.join(PROJ, 'src', 'components', 'ProfilesPanel.jsx'), 'utf8');
+  if (!/data-search-input/.test(profilesSrc)) throw new Error('search input not tagged');
+});
+
+// =====================================================================
 header('4. Settings inline-result coverage');
 await test('SettingsPanel: InlineCheckResult handles every status', () => {
   const src = fs.readFileSync(path.join(PROJ, 'src', 'components', 'SettingsPanel.jsx'), 'utf8');

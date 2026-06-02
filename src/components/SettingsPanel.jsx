@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import {
   FolderOpen, Trash2, RefreshCw, CheckCircle2, AlertTriangle, Download,
-  ExternalLink, Loader2, Github, Info, Layers,
+  ExternalLink, Loader2, Github, Info, Layers, Cpu, MemoryStick, Sparkles,
 } from 'lucide-react';
 import { bytes as fmtBytes, relativeTime } from '../utils/format';
 
@@ -77,16 +77,7 @@ export default function SettingsPanel() {
         </div>
       </Section>
 
-      <Section title="Performance">
-        <Row label="Max concurrent jobs" hint="Higher = faster, more memory">
-          <input type="number" className="input" min={1} max={16} value={settings.maxConcurrent}
-                 onChange={(e) => set({ maxConcurrent: Number(e.target.value) })}/>
-        </Row>
-        <Row label="Memory-friendly mode" hint="Lower memory at the cost of throughput">
-          <Toggle checked={!!settings.memoryFriendly}
-                  onChange={(v) => set({ memoryFriendly: v })}/>
-        </Row>
-      </Section>
+      <PerformanceSection settings={settings} set={set}/>
 
       <Section title="PDF export">
         <Row label="Compression">
@@ -187,6 +178,104 @@ function AppVersionBadge() {
  * It also force-re-renders every 60 s so the "Last checked: 2 minutes ago"
  * label stays accurate without requiring a click.
  */
+/**
+ * Performance section with hardware-aware advisor.
+ *
+ * Replaces the old "Max concurrent jobs = N" input. Pulls CPU + RAM from the
+ * main process via app:getSystemInfo IPC, shows them as info chips, and
+ * surfaces a "Recommended for your PC" tile with one-click apply.
+ */
+function PerformanceSection({ settings, set }) {
+  const [sys, setSys] = useState(null);
+  useEffect(() => {
+    const v = window.veloxa;
+    if (v?.app?.getSystemInfo) v.app.getSystemInfo().then(setSys).catch(() => {});
+  }, []);
+  const current = settings.maxConcurrent || 4;
+  const rec = sys ? sys.recommendedConcurrent : null;
+  return (
+    <Section title="Performance">
+      <Row label="Max concurrent jobs" hint="Higher = faster, more memory">
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            className="input flex-1"
+            min={1}
+            max={16}
+            value={current}
+            onChange={(e) => set({ maxConcurrent: Number(e.target.value) })}
+          />
+          {rec != null && rec !== current && (
+            <button
+              onClick={() => set({ maxConcurrent: rec })}
+              className="btn-outline text-xs whitespace-nowrap"
+              title={`Set to recommended (${rec})`}
+            >
+              <Sparkles className="w-3.5 h-3.5"/> Use {rec}
+            </button>
+          )}
+        </div>
+      </Row>
+
+      {/* Hardware advisor — three-tile readout of detected specs + tip. */}
+      <div className="rounded-xl border border-ink-500/40 bg-ink-700/30 p-4">
+        <div className="text-[10px] uppercase tracking-widest text-muted mb-2">Detected hardware</div>
+        <div className="grid grid-cols-3 gap-3">
+          <HardwareTile
+            icon={Sparkles}
+            label="Recommended"
+            value={sys ? sys.recommendedConcurrent : '…'}
+            highlight
+            hint="leaves 2 cores for the OS/UI, capped at 8 (diminishing returns past that)"
+          />
+          <HardwareTile
+            icon={Cpu}
+            label="CPU"
+            value={sys ? `${sys.cpuCores} cores` : '…'}
+            hint={sys ? sys.cpuModel : ''}
+          />
+          <HardwareTile
+            icon={MemoryStick}
+            label="RAM"
+            value={sys ? `${sys.totalRamGb} GB` : '…'}
+            hint={sys ? `${sys.freeRamGb} GB free right now` : ''}
+          />
+        </div>
+        {sys && current > sys.cpuCores && (
+          <div className="mt-3 text-xs text-amber-300 flex items-center gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5"/>
+            You're requesting {current} workers but only have {sys.cpuCores} cores — extras will idle.
+          </div>
+        )}
+      </div>
+
+      <Row label="Memory-friendly mode" hint="Lower memory at the cost of throughput">
+        <Toggle checked={!!settings.memoryFriendly}
+                onChange={(v) => set({ memoryFriendly: v })}/>
+      </Row>
+    </Section>
+  );
+}
+
+function HardwareTile({ icon: Icon, label, value, hint, highlight }) {
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 ${
+        highlight
+          ? 'border-veloxa-500/40 bg-veloxa-600/10'
+          : 'border-ink-500/40 bg-ink-700/40'
+      }`}
+      title={hint || ''}
+    >
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <Icon className={`w-3 h-3 ${highlight ? 'text-veloxa-300' : 'text-muted'}`}/>
+        <div className="text-[10px] uppercase tracking-widest text-muted">{label}</div>
+      </div>
+      <div className={`text-sm font-semibold ${highlight ? 'text-veloxa-200' : 'text-ink-100'} font-mono`}>{value}</div>
+    </div>
+  );
+}
+
 function UpdatesSection({ settings, set }) {
   const { checkForUpdates, updater, downloadUpdate, installUpdate, dismissUpdate } = useStore();
   const v = typeof window !== 'undefined' ? window.veloxa : null;
