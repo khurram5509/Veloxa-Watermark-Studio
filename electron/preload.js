@@ -83,7 +83,8 @@ contextBridge.exposeInMainWorld('veloxa', {
   updater: {
     check: (opts) => invoke('updater:check', opts || {}),
     download: (asset) => invoke('updater:download', asset),
-    openInstaller: (p) => invoke('updater:openInstaller', p),
+    openInstaller: (p, opts) => invoke('updater:openInstaller', p, opts || {}),
+    revealInstaller: (p) => invoke('updater:revealInstaller', p),
     dismissVersion: (v) => invoke('updater:dismissVersion', v),
     openReleaseUrl: (url) => invoke('updater:openReleaseUrl', url),
   },

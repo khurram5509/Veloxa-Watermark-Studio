@@ -160,11 +160,21 @@ export const useStore = create((set, get) => ({
     set((s) => ({ updater: { ...s.updater, status: 'ready', installerPath: result.path, error: null } }));
     return result;
   },
-  installUpdate: async () => {
+  installUpdate: async ({ wizard = false } = {}) => {
     if (!v || !v.updater) return;
     const p = get().updater.installerPath;
     if (!p) return;
-    await v.updater.openInstaller(p);
+    // Silent by default — the installer runs without a wizard, closes the
+    // running Veloxa app, replaces files, and relaunches. The "wizard"
+    // option exposes the legacy openPath behavior for users who prefer to
+    // click through the wizard (or for debugging install failures).
+    await v.updater.openInstaller(p, { veryVerbose: !!wizard });
+  },
+  revealUpdateInstaller: async () => {
+    if (!v || !v.updater) return;
+    const p = get().updater.installerPath;
+    if (!p) return;
+    await v.updater.revealInstaller(p);
   },
   dismissUpdate: async () => {
     if (!v || !v.updater) return;

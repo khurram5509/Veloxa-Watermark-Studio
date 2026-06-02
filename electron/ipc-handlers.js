@@ -203,14 +203,62 @@ function registerIpcHandlers({ getMainWindow }) {
     }
   });
 
-  ipcMain.handle('updater:openInstaller', async (_e, installerPath) => {
+  ipcMain.handle('updater:openInstaller', async (_e, installerPath, opts = {}) => {
     if (!installerPath || !fs.existsSync(installerPath)) {
       return { ok: false, error: 'Installer file not found' };
     }
-    // shell.openPath runs the .exe through the user's normal Windows handler;
-    // they'll see the standard UAC / per-user installer prompt.
-    const result = await shell.openPath(installerPath);
-    if (result) return { ok: false, error: result };
+
+    // Windows attaches a "MOTW" (Mark-of-the-Web) zone-identifier stream to
+    // files downloaded by HTTPS so SmartScreen knows to warn. The
+    // (Save|Open)As… "Don't run" default has bitten users hard: they click
+    // Install, see the warning, click Don't Run, and assume the update
+    // happened. Strip the alternate data stream so the .exe runs without
+    // SmartScreen blocking it. Best-effort — failure is non-fatal.
+    try {
+      const zoneStream = installerPath + ':Zone.Identifier';
+      if (fs.existsSync(zoneStream)) fs.unlinkSync(zoneStream);
+    } catch { /* ignore */ }
+
+    // Spawn the Inno installer with /SILENT (shows a progress bar only,
+    // no wizard) and CLOSE/RESTART so the running Veloxa app is shut down
+    // before file replacement and relaunched once install completes.
+    // Falls back to shell.openPath only if spawn itself fails.
+    const { spawn } = require('node:child_process');
+    try {
+      const args = opts.veryVerbose
+        ? [] // user explicitly wants the wizard (debug / "Show installer wizard" affordance)
+        : [
+            '/SILENT',
+            '/SUPPRESSMSGBOXES',
+            '/NORESTART',
+            '/CLOSEAPPLICATIONS',
+            '/RESTARTAPPLICATIONS',
+          ];
+      const child = spawn(installerPath, args, {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+      });
+      child.unref();
+      // The installer will taskkill our exe partway through. Give it a
+      // moment to actually attach before the renderer's main window is
+      // torn down by the install.
+      return { ok: true, silent: !opts.veryVerbose };
+    } catch (err) {
+      logger.warn(`Silent installer spawn failed (${err.message}), falling back to shell.openPath`);
+      const result = await shell.openPath(installerPath);
+      if (result) return { ok: false, error: result };
+      return { ok: true, silent: false, fallback: 'shell.openPath' };
+    }
+  });
+
+  // Reveal-in-File-Explorer fallback so the user can launch the installer
+  // by hand if SmartScreen blocks the silent spawn.
+  ipcMain.handle('updater:revealInstaller', async (_e, installerPath) => {
+    if (!installerPath || !fs.existsSync(installerPath)) {
+      return { ok: false, error: 'Installer file not found' };
+    }
+    shell.showItemInFolder(installerPath);
     return { ok: true };
   });
 

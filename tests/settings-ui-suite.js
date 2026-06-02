@@ -139,6 +139,54 @@ await test('SettingsPanel: tiles prefer fresh updater.info over disk cache', () 
 });
 
 // =====================================================================
+header('5. Silent install resilience (v2.5.3)');
+const ipcSrc = fs.readFileSync(path.join(PROJ, 'electron', 'ipc-handlers.js'), 'utf8');
+await test('updater:openInstaller passes Inno Setup silent flags', () => {
+  // Required flags: /SILENT (no wizard), /SUPPRESSMSGBOXES (no errors popups),
+  // /CLOSEAPPLICATIONS + /RESTARTAPPLICATIONS (graceful app shutdown + relaunch)
+  for (const flag of ['/SILENT', '/SUPPRESSMSGBOXES', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS']) {
+    if (!ipcSrc.includes(`'${flag}'`)) throw new Error(`flag missing: ${flag}`);
+  }
+});
+await test('updater:openInstaller strips MOTW Zone.Identifier before launch', () => {
+  if (!/Zone\.Identifier/.test(ipcSrc))
+    throw new Error('Zone.Identifier stripping not implemented — SmartScreen will still block');
+  if (!/fs\.unlinkSync\(zoneStream\)/.test(ipcSrc))
+    throw new Error('Zone.Identifier should be unlinked');
+});
+await test('updater:openInstaller uses spawn with detached:true', () => {
+  if (!/spawn\(installerPath/.test(ipcSrc))
+    throw new Error('should spawn installer directly, not shell.openPath');
+  if (!/detached:\s*true/.test(ipcSrc))
+    throw new Error('spawn must detach so installer survives our exit');
+});
+await test('updater:openInstaller has shell.openPath fallback', () => {
+  if (!/catch.*shell\.openPath/s.test(ipcSrc))
+    throw new Error('should fall back to shell.openPath if spawn fails');
+});
+await test('updater:revealInstaller IPC handler exists', () => {
+  if (!ipcSrc.includes("'updater:revealInstaller'"))
+    throw new Error('revealInstaller handler missing');
+  if (!/shell\.showItemInFolder\(installerPath\)/.test(ipcSrc))
+    throw new Error('should use shell.showItemInFolder');
+});
+await test('store: installUpdate defaults to silent (wizard=false)', () => {
+  if (!/installUpdate:\s*async\s*\(\s*\{\s*wizard\s*=\s*false\s*\}\s*=\s*\{\}\s*\)/.test(storeSrc))
+    throw new Error('installUpdate signature should default wizard=false');
+  if (!/veryVerbose:\s*!!wizard/.test(storeSrc))
+    throw new Error('store should pass veryVerbose: !!wizard to IPC');
+});
+await test('store: revealUpdateInstaller action exists', () => {
+  if (!/revealUpdateInstaller:\s*async/.test(storeSrc))
+    throw new Error('revealUpdateInstaller action missing');
+});
+await test('preload exposes revealInstaller', () => {
+  const preloadSrc = fs.readFileSync(path.join(PROJ, 'electron', 'preload.js'), 'utf8');
+  if (!/revealInstaller:/.test(preloadSrc))
+    throw new Error('preload.updater.revealInstaller not exposed');
+});
+
+// =====================================================================
 header('4. Settings inline-result coverage');
 await test('SettingsPanel: InlineCheckResult handles every status', () => {
   const src = fs.readFileSync(path.join(PROJ, 'src', 'components', 'SettingsPanel.jsx'), 'utf8');
