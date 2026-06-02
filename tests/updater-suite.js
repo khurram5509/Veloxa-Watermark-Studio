@@ -291,9 +291,10 @@ function httpReq(p) {
 await test('GET /api/update/check returns either a result or 502', async () => {
   const r = await httpReq('/api/update/check?force=1');
   // Either succeeds (200 with hasUpdate field) or 502 (network error)
+  const expectedVersion = require(`${PROJ}/package.json`).version;
   if (r.status === 200) {
     if (typeof r.body.hasUpdate !== 'boolean') throw new Error('no hasUpdate field');
-    if (r.body.current !== '2.5.0') throw new Error('current mismatch: ' + r.body.current);
+    if (r.body.current !== expectedVersion) throw new Error(`current mismatch: ${r.body.current} (expected ${expectedVersion})`);
   } else if (r.status === 502) {
     if (!r.body.error) throw new Error('502 without error field');
   } else {
