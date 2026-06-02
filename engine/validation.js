@@ -22,6 +22,12 @@ function validateProfile(profile) {
   if (usesText) {
     if (!profile.text || !String(profile.text).trim()) {
       errors.push('Profile uses text but no watermark text is set');
+    } else if (String(profile.text).length > 10000) {
+      // A real watermark is "CONFIDENTIAL" or "Draft v3" — not 5 MB of text.
+      // Cap at 10K chars so a misbehaving script (or a buggy test that
+      // accidentally targets the real user data dir) can't bloat
+      // profiles.json and make startup hang while the renderer parses it.
+      errors.push(`Watermark text is too long (${profile.text.length} chars, max 10000)`);
     }
   }
 

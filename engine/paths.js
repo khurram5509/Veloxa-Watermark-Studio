@@ -17,6 +17,16 @@ let _userData = null;
 function userData() {
   if (_userData) return ensureDir(_userData);
 
+  // Explicit override — checked FIRST so tests, CLI scripts, and the HTTP
+  // server can sandbox their data dir away from the user's real install.
+  // This must run before app.getPath('userData') so a misconfigured test can't
+  // silently write into %APPDATA%\Veloxa Watermark Studio (which previously
+  // bloated profiles.json to 46MB and made startup look like a crash).
+  if (process.env.VELOXA_USER_DATA) {
+    _userData = process.env.VELOXA_USER_DATA;
+    return ensureDir(_userData);
+  }
+
   // Inside Electron: prefer app.getPath('userData')
   try {
     const electron = require('electron');

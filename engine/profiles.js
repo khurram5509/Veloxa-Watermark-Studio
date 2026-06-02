@@ -116,10 +116,26 @@ const list = () => load().slice();
 const get = (id) => load().find((p) => p.id === id) || null;
 const getDefault = () => load().find((p) => p.isDefault) || load()[0] || null;
 
+// Hard cap to keep profiles.json from being polluted with multi-MB blobs.
+// One legitimate profile is a few hundred bytes; 50 KB is generous headroom
+// for someone with a custom-namingTemplate and a very long watermark text,
+// but small enough that even 100 such profiles stay under 5 MB.
+const MAX_PROFILE_BYTES = 50 * 1024;
+
 function save(profile) {
   load();
   const id = profile.id || crypto.randomUUID();
   const next = { ...profile, id };
+
+  // Reject monsters at the data layer — defense-in-depth against the
+  // 46-MB-profiles.json regression that made the app appear to crash on
+  // startup. The HTTP `/api/profiles` route and IPC `profiles:save` handler
+  // both funnel through here, so this catches every entry point.
+  const size = Buffer.byteLength(JSON.stringify(next), 'utf8');
+  if (size > MAX_PROFILE_BYTES) {
+    throw new Error(`Profile too large (${size} bytes, max ${MAX_PROFILE_BYTES})`);
+  }
+
   const idx = cache.findIndex((p) => p.id === id);
   if (idx >= 0) cache[idx] = next;
   else cache.push(next);
