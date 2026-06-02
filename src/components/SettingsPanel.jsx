@@ -198,7 +198,16 @@ function UpdatesSection({ settings, set }) {
   }, []);
 
   const appV = (v && v.versions && v.versions.app) || 'dev';
-  const cached = settings.cachedLatestRelease;
+  // Prefer the freshly-returned check result over the on-disk cache so the
+  // tiles update instantly after "Check now" — the store also reloads
+  // settings after each check, but updater.info is the canonical fresh value.
+  const cached = (updater.info && updater.info.ok !== false && updater.info.latest)
+    ? {
+        latest: updater.info.latest,
+        releaseUrl: updater.info.releaseUrl,
+        asset: updater.info.asset,
+      }
+    : settings.cachedLatestRelease;
   const lastMs = settings.lastUpdateCheckMs;
   const dismissed = settings.dismissedUpdateVersion;
 

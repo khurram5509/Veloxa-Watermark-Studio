@@ -119,6 +119,24 @@ await test('App.jsx startup call passes silent:true', () => {
   if (!/checkForUpdates\(\{\s*force:\s*false,\s*silent:\s*true\s*\}\)/.test(appSrc))
     throw new Error('startup check should pass silent:true');
 });
+await test('store: checkForUpdates reloads settings on success', () => {
+  // After a successful check, the main process persists the new
+  // cachedLatestRelease + lastUpdateCheckMs to disk. The renderer must
+  // re-pull settings or the Settings tiles stay stuck on the boot-time
+  // snapshot. The bug screenshot showed "Latest known: v2.5.0" while the
+  // download row already said "Downloading v2.5.1…".
+  if (!/await\s+v\.settings\.get\(\)/.test(storeSrc))
+    throw new Error('store should call v.settings.get() to refresh');
+  if (!/set\(\{\s*settings:\s*s\s*\}\)/.test(storeSrc))
+    throw new Error('store should apply the refreshed settings');
+});
+await test('SettingsPanel: tiles prefer fresh updater.info over disk cache', () => {
+  const src = fs.readFileSync(path.join(PROJ, 'src', 'components', 'SettingsPanel.jsx'), 'utf8');
+  // The metric tile read should fall back to settings.cachedLatestRelease
+  // only when updater.info is missing.
+  if (!/updater\.info[\s\S]{0,200}?settings\.cachedLatestRelease/.test(src))
+    throw new Error('tile read should prefer updater.info, fall back to settings.cachedLatestRelease');
+});
 
 // =====================================================================
 header('4. Settings inline-result coverage');

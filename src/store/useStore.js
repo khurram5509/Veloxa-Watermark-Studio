@@ -129,6 +129,15 @@ export const useStore = create((set, get) => ({
       set({ updater: { status: 'error', info: null, progress: null, installerPath: null, error: result.error } });
       return result;
     }
+    // Refresh the local settings cache so the "Latest known / Last checked"
+    // tiles in Settings reflect the values the main process just persisted.
+    // Previously the tiles stayed pinned to whatever was on disk at app boot,
+    // which made "Latest known: v2.5.0" appear even after a successful check
+    // that found v2.5.1 (visible in the "Downloading v2.5.1…" status row).
+    try {
+      const s = await v.settings.get();
+      set({ settings: s });
+    } catch { /* non-fatal */ }
     if (result.hasUpdate && !result.dismissed) {
       // Always surface an available update, even when silent — that's the
       // whole point of background checking.
