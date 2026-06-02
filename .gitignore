@@ -1,0 +1,18 @@
+node_modules/
+dist/
+release/
+.vite/
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.local
+.idea/
+.vscode/
+
+# Editor / IDE temp files
+*.tmp.*
+*.tmp
+
+# Claude Code session state
+.claude/

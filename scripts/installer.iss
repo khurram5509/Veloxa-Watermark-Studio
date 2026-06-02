@@ -1,0 +1,102 @@
+; ============================================================================
+; Veloxa Watermark Studio - Inno Setup installer script
+;
+; Compiles the @electron/packager output (release\Veloxa Watermark Studio-win32-x64\)
+; into a polished Windows installer with Start Menu / Desktop shortcuts, an
+; Add-or-Remove-Programs entry, and a clean uninstaller.
+;
+; Per-user install (no admin required) — installs to %LOCALAPPDATA%\Programs.
+;
+; Compile with:
+;   "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" scripts\installer.iss
+;
+; Output:
+;   release\VeloxaWatermarkStudio-Setup-{version}.exe
+; ============================================================================
+
+#define MyAppName        "Veloxa Watermark Studio"
+#define MyAppShortName   "VeloxaWatermarkStudio"
+#define MyAppVersion     "2.5.0"
+#define MyAppPublisher   "Veloxa"
+#define MyAppURL         "https://veloxa.app"
+#define MyAppExeName     "Veloxa Watermark Studio.exe"
+#define MyAppId          "{{A4F6E1F0-2F9C-4F4B-9C3A-VELOXAWATERMARK}"
+
+[Setup]
+AppId={#MyAppId}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
+AppUpdatesURL={#MyAppURL}
+AppCopyright=Copyright (C) 2026 {#MyAppPublisher}
+DefaultDirName={localappdata}\Programs\{#MyAppName}
+DefaultGroupName={#MyAppName}
+DisableProgramGroupPage=yes
+DisableDirPage=no
+AllowNoIcons=yes
+LicenseFile=
+; Build to a non-Dropbox path to avoid sync grabbing the output file mid-write.
+; Override on the command line with /O if needed.
+OutputDir={#GetEnv('TEMP')}\veloxa-installer-build
+OutputBaseFilename={#MyAppShortName}-Setup-{#MyAppVersion}
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog commandline
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+UninstallDisplayName={#MyAppName}
+UninstallDisplayIcon={app}\{#MyAppExeName}
+ChangesAssociations=no
+SetupIconFile=
+MinVersion=10.0.17763
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "startmenu";   Description: "Create a Start Menu shortcut";        GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
+
+[Files]
+; Pull in the entire packaged Electron app
+Source: "..\release\Veloxa Watermark Studio-win32-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{userprograms}\{#MyAppName}";    Filename: "{app}\{#MyAppExeName}"; Tasks: startmenu; WorkingDir: "{app}"
+Name: "{userdesktop}\{#MyAppName}";     Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; WorkingDir: "{app}"
+Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallDelete]
+; Per-app caches that the app might write inside its install dir
+Type: filesandordirs; Name: "{app}\Crashpad"
+Type: filesandordirs; Name: "{app}\GPUCache"
+
+[Code]
+function InitializeSetup(): Boolean;
+begin
+  Result := True;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep = ssInstall then
+  begin
+    // If the app is currently running, stop it before overwriting
+    Exec('taskkill.exe', '/F /IM "{#MyAppExeName}" /T',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;

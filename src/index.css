@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root { height: 100%; }
+* { -webkit-user-select: none; user-select: none; }
+input, textarea, [contenteditable="true"] { -webkit-user-select: text; user-select: text; }
+
+/* Custom titlebar drag */
+.app-drag { -webkit-app-region: drag; }
+.app-no-drag { -webkit-app-region: no-drag; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.12); }
+
+/* ----------------------------- Light mode ----------------------------- */
+html.light body { @apply bg-slate-50 text-slate-900; }
+
+/* Surfaces */
+html.light .surface-1 { @apply bg-white border-slate-200; }
+html.light .surface-2 { @apply bg-slate-100 border-slate-200; }
+html.light .text-muted { @apply text-slate-500; }
+
+/* Text colors — most components reference text-ink-* directly */
+html.light .text-ink-100,
+html.light .text-ink-200,
+html.light .text-ink-200\/70,
+html.light .text-ink-200\/60,
+html.light .text-ink-200\/50,
+html.light .text-ink-200\/40,
+html.light .text-ink-200\/80 { @apply text-slate-700; }
+html.light .text-white { @apply text-slate-900; }
+
+/* Backgrounds (most variants used in the app) */
+html.light .bg-ink-900,
+html.light .bg-ink-900\/80 { @apply bg-slate-50; }
+html.light .bg-ink-800,
+html.light .bg-ink-800\/80,
+html.light .bg-ink-800\/95 { @apply bg-white; }
+html.light .bg-ink-700,
+html.light .bg-ink-700\/20,
+html.light .bg-ink-700\/40,
+html.light .bg-ink-700\/60 { @apply bg-slate-100; }
+html.light .bg-ink-600,
+html.light .bg-ink-600\/15 { @apply bg-slate-200; }
+
+/* Borders */
+html.light .border-ink-600,
+html.light .border-ink-600\/40,
+html.light .border-ink-600\/50,
+html.light .border-ink-600\/60 { @apply border-slate-200; }
+html.light .border-ink-500,
+html.light .border-ink-500\/30,
+html.light .border-ink-500\/50,
+html.light .border-ink-500\/60 { @apply border-slate-300; }
+
+/* Hover affordances — flip the white-on-dark shimmer to grey-on-light */
+html.light .hover\:bg-white\/5:hover { background-color: rgba(15, 23, 42, 0.05); }
+
+/* Inputs/selects: explicit light styling so placeholder etc. is readable */
+html.light .input,
+html.light .select,
+html.light .textarea {
+  @apply bg-white border-slate-300 text-slate-900;
+}
+html.light .input::placeholder,
+html.light .textarea::placeholder { color: rgb(148 163 184); }
+
+/* Code chips inside Help modal */
+html.light code.font-mono { @apply bg-slate-100 border-slate-200 text-veloxa-700; }
+
+/* TitleBar buttons stay legible */
+html.light .app-drag { color: theme('colors.slate.900'); }
+
+@layer components {
+  .surface-1 { @apply bg-ink-800/80 border border-ink-600/60 backdrop-blur-md; }
+  .surface-2 { @apply bg-ink-700/60 border border-ink-600/50; }
+  .text-muted { @apply text-ink-200/70; }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg
+           text-sm font-medium transition-all duration-150 select-none
+           border border-transparent;
+  }
+  .btn-primary {
+    @apply btn bg-veloxa-600 hover:bg-veloxa-500 active:bg-veloxa-700 text-white shadow-glow;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent hover:bg-white/5 text-ink-100;
+  }
+  .btn-outline {
+    @apply btn bg-transparent border-ink-500/60 hover:border-veloxa-500 hover:text-white text-ink-100;
+  }
+  .input, .select, .textarea {
+    @apply w-full bg-ink-700/60 border border-ink-500/50 rounded-lg px-3 py-2
+           text-sm text-ink-100 placeholder:text-ink-200/40
+           focus:outline-none focus:border-veloxa-500 focus:ring-2 focus:ring-veloxa-500/30
+           transition-colors;
+  }
+  .label { @apply text-xs font-medium uppercase tracking-wider text-ink-200/60 mb-1.5; }
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium border;
+  }
+  .gradient-veloxa {
+    background: linear-gradient(135deg, #1f3df5 0%, #5e87ff 50%, #92b3ff 100%);
+  }
+}
+
+/* Drop zone hover state */
+.drop-active {
+  border-color: rgb(58 96 255 / 1) !important;
+  background: rgba(58, 96, 255, 0.08) !important;
+}

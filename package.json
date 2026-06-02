@@ -1,0 +1,116 @@
+{
+  "name": "veloxa-watermark-studio",
+  "productName": "Veloxa Watermark Studio",
+  "version": "2.5.0",
+  "description": "Automated Bulk Document Watermarking for PDF, DOCX, and PPTX",
+  "author": {
+    "name": "Veloxa",
+    "email": "support@veloxa.app"
+  },
+  "veloxa": {
+    "updateRepo": "khurram5509/Veloxa-Watermark-Studio",
+    "updateAssetPattern": "VeloxaWatermarkStudio-Setup-{version}.exe"
+  },
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:vite\" \"npm:dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on tcp:5173 && cross-env NODE_ENV=development electron .",
+    "build": "vite build",
+    "preview": "vite preview",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:portable": "npm run build && electron-builder --win portable",
+    "dist:installer": "npm run build && electron-builder --win nsis",
+    "server": "node server/index.js",
+    "smoke": "node scripts/smoke-engine.js",
+    "installer": "node scripts/build-installer.js"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "pizzip": "^3.1.7"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.0.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.0.1",
+    "cross-env": "^7.0.3",
+    "electron": "^33.0.2",
+    "electron-builder": "^25.1.8",
+    "framer-motion": "^11.11.17",
+    "lucide-react": "^0.453.0",
+    "postcss": "^8.4.47",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwindcss": "^3.4.14",
+    "vite": "^5.4.10",
+    "wait-on": "^8.0.1",
+    "zustand": "^5.0.1"
+  },
+  "build": {
+    "appId": "app.veloxa.watermarkstudio",
+    "productName": "Veloxa Watermark Studio",
+    "copyright": "Copyright © 2026 Veloxa",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "engine/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "fileAssociations": [
+        {
+          "ext": "pdf",
+          "name": "PDF Document",
+          "role": "Editor"
+        },
+        {
+          "ext": "docx",
+          "name": "Word Document",
+          "role": "Editor"
+        },
+        {
+          "ext": "pptx",
+          "name": "PowerPoint Presentation",
+          "role": "Editor"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Veloxa Watermark Studio",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "perMachine": false
+    },
+    "portable": {
+      "artifactName": "VeloxaWatermarkStudio-Portable-${version}.exe"
+    }
+  }
+}
