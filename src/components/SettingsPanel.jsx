@@ -2,9 +2,9 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import {
   FolderOpen, Trash2, RefreshCw, CheckCircle2, AlertTriangle, Download,
-  ExternalLink, Loader2, Github, Info, Layers, Cpu, MemoryStick, Sparkles,
-  Search, Sliders, Folder, Database, Bell, Hash, ShieldCheck, FileText,
-  Sun, Moon, Copy, Upload, RotateCcw, ChevronDown,
+  ExternalLink, Loader2, Github, Info, Cpu, MemoryStick, Sparkles,
+  Search, Database, Bell, ShieldCheck, FileText,
+  Sun, Moon, Copy, Upload, RotateCcw,
 } from 'lucide-react';
 import { bytes as fmtBytes, relativeTime } from '../utils/format';
 
