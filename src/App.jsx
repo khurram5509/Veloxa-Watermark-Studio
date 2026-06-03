@@ -411,8 +411,10 @@ function LogsView() {
 }
 
 function SettingsView() {
+  // overflow-hidden on the outer wrapper so the SettingsPanel's main column
+  // owns the scrollbar — that's what the sticky left-rail nav anchors to.
   return (
-    <div className="h-full p-5 overflow-auto">
+    <div className="h-full p-5 overflow-hidden">
       <SettingsPanel/>
     </div>
   );

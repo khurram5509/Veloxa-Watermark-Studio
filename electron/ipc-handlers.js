@@ -276,6 +276,108 @@ function registerIpcHandlers({ getMainWindow }) {
     return { ok: true };
   });
 
+  // ---- v2.6.2 Settings polish: storage stats + data paths + reset/export/import ----
+  ipcMain.handle('app:getStorageStats', async () => {
+    const { dataDir, logosDir, profilesFile, settingsFile, logsFile } = require('../engine/paths');
+    async function dirStats(p) {
+      try {
+        const entries = await fsp.readdir(p);
+        let bytes = 0;
+        for (const e of entries) {
+          try { const s = await fsp.stat(path.join(p, e)); if (s.isFile()) bytes += s.size; } catch {}
+        }
+        return { count: entries.length, bytes };
+      } catch { return { count: 0, bytes: 0 }; }
+    }
+    async function fileSize(p) {
+      try { return (await fsp.stat(p)).size; } catch { return 0; }
+    }
+    const [logos, profilesBytes, settingsBytes, logsBytes] = await Promise.all([
+      dirStats(logosDir()),
+      fileSize(profilesFile()),
+      fileSize(settingsFile()),
+      fileSize(logsFile()),
+    ]);
+    return {
+      logos,
+      profiles: { bytes: profilesBytes, count: profiles.list().length },
+      logs:     { bytes: logsBytes },
+      settings: { bytes: settingsBytes },
+    };
+  });
+
+  ipcMain.handle('app:getDataPaths', async () => {
+    const { dataDir, logosDir, profilesFile, settingsFile, logsFile } = require('../engine/paths');
+    return {
+      dataDir: dataDir(),
+      logosDir: logosDir(),
+      profilesFile: profilesFile(),
+      settingsFile: settingsFile(),
+      logsFile: logsFile(),
+    };
+  });
+
+  ipcMain.handle('app:resetSettings', async (_e, opts = {}) => {
+    // opts.keep — optional array of keys to preserve (e.g. checkForUpdates so
+    // a user who reset doesn't accidentally re-enable startup checks they'd
+    // explicitly disabled). Defaults: keep nothing, full reset to DEFAULTS.
+    try {
+      const keep = Array.isArray(opts.keep) ? opts.keep : [];
+      const current = settings.get();
+      const { DEFAULTS } = require('../engine/settings');
+      const preserved = {};
+      for (const k of keep) if (k in current) preserved[k] = current[k];
+      // settings.set spreads patch over the current cache; to do a true reset
+      // we have to write the DEFAULTS shape directly. Use set() with the full
+      // defaults object plus preserved overrides.
+      const next = { ...DEFAULTS, ...preserved };
+      // Clear every existing key not in next by overwriting with undefined.
+      for (const k of Object.keys(current)) {
+        if (!(k in next)) next[k] = undefined;
+      }
+      const merged = settings.set(next);
+      logger.info('Settings reset to defaults');
+      return { ok: true, settings: merged };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('app:exportSettings', async (_e, destPath) => {
+    try {
+      const target = destPath || (await dialog.showSaveDialog({
+        title: 'Export settings',
+        defaultPath: `veloxa-settings-${new Date().toISOString().slice(0, 10)}.json`,
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      })).filePath;
+      if (!target) return { ok: false, cancelled: true };
+      await fsp.writeFile(target, JSON.stringify(settings.get(), null, 2), 'utf8');
+      logger.info(`Settings exported to ${target}`);
+      return { ok: true, path: target };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('app:importSettings', async (_e, sourcePath) => {
+    try {
+      const source = sourcePath || (await dialog.showOpenDialog({
+        title: 'Import settings',
+        properties: ['openFile'],
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      })).filePaths[0];
+      if (!source) return { ok: false, cancelled: true };
+      const raw = await fsp.readFile(source, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') throw new Error('Not a settings object');
+      const merged = settings.set(parsed);
+      logger.info(`Settings imported from ${source}`);
+      return { ok: true, settings: merged, path: source };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   // ---- File-size lookup (v2.6.0: Dashboard size summary) ----
   // Batched so the renderer can ask once instead of N IPC calls.
   ipcMain.handle('app:getFileSizes', async (_e, paths) => {

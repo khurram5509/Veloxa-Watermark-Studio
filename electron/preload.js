@@ -37,6 +37,11 @@ contextBridge.exposeInMainWorld('veloxa', {
     checkConverter: (refresh) => invoke('app:checkConverter', !!refresh),
     getFileSizes: (paths) => invoke('app:getFileSizes', paths || []),
     getSystemInfo: () => invoke('app:getSystemInfo'),
+    getStorageStats: () => invoke('app:getStorageStats'),
+    getDataPaths: () => invoke('app:getDataPaths'),
+    resetSettings: (opts) => invoke('app:resetSettings', opts || {}),
+    exportSettings: (dest) => invoke('app:exportSettings', dest),
+    importSettings: (src) => invoke('app:importSettings', src),
   },
 
   // File scanning

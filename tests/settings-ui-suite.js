@@ -72,17 +72,17 @@ await test('Future timestamp falls back to date string', () => {
 // =====================================================================
 header('2. SettingsPanel.jsx syntax / imports');
 await test('SettingsPanel.jsx parses as valid JSX-stripped JS', () => {
-  // We can't fully parse JSX without babel; just verify there are no
-  // mismatched braces and the key exports look right.
   const src = fs.readFileSync(path.join(PROJ, 'src', 'components', 'SettingsPanel.jsx'), 'utf8');
   if (!src.includes('export default function SettingsPanel')) throw new Error('no default export');
   if (!src.includes('UpdatesSection')) throw new Error('UpdatesSection missing');
   if (!src.includes('InlineCheckResult')) throw new Error('InlineCheckResult missing');
   if (!src.includes('relativeTime')) throw new Error('relativeTime not imported');
-  // Quick brace balance check
-  const open = (src.match(/{/g) || []).length;
-  const close = (src.match(/}/g) || []).length;
-  if (open !== close) throw new Error(`brace mismatch: ${open} open, ${close} close`);
+  // Brace balance — strip regex literals first because `\{ \}` inside them
+  // counts as a brace even though it's a character class escape.
+  const stripped = src.replace(/\/[^/\n]+\/g/g, '/REGEX/');
+  const open = (stripped.match(/{/g) || []).length;
+  const close = (stripped.match(/}/g) || []).length;
+  if (open !== close) throw new Error(`brace mismatch (post-regex-strip): ${open} open, ${close} close`);
 });
 await test('UpdateBanner.jsx still importable + has expected branches', () => {
   const src = fs.readFileSync(path.join(PROJ, 'src', 'components', 'UpdateBanner.jsx'), 'utf8');
@@ -228,8 +228,11 @@ await test('ProfileEditor: PositionGrid component + 9-cell grid array', () => {
     if (!editorSrc.includes(`v: '${p}'`)) throw new Error(`grid cell missing: ${p}`);
   }
 });
-await test('SettingsPanel: PerformanceSection has hardware advisor', () => {
-  if (!/function PerformanceSection/.test(settingsSrc)) throw new Error('PerformanceSection missing');
+await test('SettingsPanel: Performance section has hardware advisor', () => {
+  // v2.6.2 renamed PerformanceSection → PerformanceBody (it's now wrapped by
+  // the generic Section component). Either name is acceptable.
+  if (!/function Performance(Section|Body)/.test(settingsSrc))
+    throw new Error('Performance section component missing');
   if (!/HardwareTile/.test(settingsSrc)) throw new Error('HardwareTile missing');
   if (!/Recommended/.test(settingsSrc)) throw new Error('Recommended tile label missing');
   if (!/getSystemInfo/.test(settingsSrc)) throw new Error('does not call getSystemInfo');
@@ -283,6 +286,83 @@ await test('generate-icon.js script is committable + standalone', () => {
     if (!/^node:(fs|path|zlib)$/.test(r))
       throw new Error(`icon generator should be dep-free; found require: ${r}`);
   }
+});
+
+// =====================================================================
+header('8. Settings page redesign (v2.6.2)');
+const settingsSrc2 = fs.readFileSync(path.join(PROJ, 'src', 'components', 'SettingsPanel.jsx'), 'utf8');
+const ipcSrc3 = fs.readFileSync(path.join(PROJ, 'electron', 'ipc-handlers.js'), 'utf8');
+const preloadSrc3 = fs.readFileSync(path.join(PROJ, 'electron', 'preload.js'), 'utf8');
+
+await test('SettingsPanel: SECTIONS array + sticky left-rail nav', () => {
+  if (!/const SECTIONS = \[/.test(settingsSrc2)) throw new Error('SECTIONS array missing');
+  if (!/sticky top-0/.test(settingsSrc2)) throw new Error('sticky nav class missing');
+  if (!/IntersectionObserver/.test(settingsSrc2)) throw new Error('scroll-spy not implemented');
+});
+await test('SettingsPanel: search box filters sections', () => {
+  if (!/Search settings/.test(settingsSrc2)) throw new Error('search input missing');
+  if (!/visibleSections/.test(settingsSrc2)) throw new Error('section filter not applied');
+});
+await test('SettingsPanel: TemplatePreview component', () => {
+  if (!/function TemplatePreview/.test(settingsSrc2)) throw new Error('TemplatePreview missing');
+  if (!/\{originalname\}/.test(settingsSrc2)) throw new Error('preview token not handled');
+  if (!/Unknown token/.test(settingsSrc2)) throw new Error('no warning for unknown tokens');
+});
+await test('SettingsPanel: theme toggle in Application section', () => {
+  if (!/setTheme\('dark'\)/.test(settingsSrc2) || !/setTheme\('light'\)/.test(settingsSrc2))
+    throw new Error('theme toggle missing');
+});
+await test('SettingsPanel: GlobalActions exports/imports/resets', () => {
+  if (!/function GlobalActions/.test(settingsSrc2)) throw new Error('GlobalActions missing');
+  for (const ipc of ['exportSettings', 'importSettings', 'resetSettings']) {
+    if (!settingsSrc2.includes(ipc)) throw new Error(`GlobalActions missing IPC: ${ipc}`);
+  }
+});
+await test('SettingsPanel: StorageSection shows usage breakdown', () => {
+  if (!/function StorageSection/.test(settingsSrc2)) throw new Error('StorageSection missing');
+  if (!/getStorageStats/.test(settingsSrc2)) throw new Error('does not call getStorageStats');
+});
+await test('SettingsPanel: AboutSection shows paths with copy + reveal', () => {
+  if (!/function AboutSection/.test(settingsSrc2)) throw new Error('AboutSection missing');
+  if (!/getDataPaths/.test(settingsSrc2)) throw new Error('does not call getDataPaths');
+  if (!/navigator\.clipboard\.writeText/.test(settingsSrc2)) throw new Error('no copy-to-clipboard');
+});
+await test('IPC: app:getStorageStats returns logos/profiles/logs/settings', () => {
+  if (!ipcSrc3.includes("'app:getStorageStats'")) throw new Error('handler missing');
+  // Pull out the handler body (between the handle( … ) and the next ipcMain).
+  // Tolerate shorthand keys (`logos,`) AND explicit form (`logos: …`).
+  const start = ipcSrc3.indexOf("'app:getStorageStats'");
+  const end = ipcSrc3.indexOf("ipcMain.handle('app:getDataPaths'");
+  const body = ipcSrc3.slice(start, end > 0 ? end : start + 2000);
+  for (const k of ['logos', 'profiles', 'logs', 'settings']) {
+    const re = new RegExp(`\\b${k}\\s*[,:]`);
+    if (!re.test(body)) throw new Error(`stats key missing: ${k}`);
+  }
+});
+await test('IPC: app:getDataPaths returns dataDir/logosDir/profilesFile/settingsFile/logsFile', () => {
+  if (!ipcSrc3.includes("'app:getDataPaths'")) throw new Error('handler missing');
+  for (const k of ['dataDir:', 'logosDir:', 'profilesFile:', 'settingsFile:', 'logsFile:']) {
+    if (!ipcSrc3.includes(k)) throw new Error(`path key missing: ${k}`);
+  }
+});
+await test('IPC: app:resetSettings preserves opt-in keys via opts.keep', () => {
+  if (!ipcSrc3.includes("'app:resetSettings'")) throw new Error('handler missing');
+  if (!/opts\.keep/.test(ipcSrc3)) throw new Error('opts.keep not honored');
+});
+await test('IPC: app:exportSettings + app:importSettings use save/open dialog', () => {
+  if (!ipcSrc3.includes("'app:exportSettings'")) throw new Error('exportSettings missing');
+  if (!ipcSrc3.includes("'app:importSettings'")) throw new Error('importSettings missing');
+  if (!/showSaveDialog/.test(ipcSrc3)) throw new Error('export should use showSaveDialog');
+  if (!/showOpenDialog/.test(ipcSrc3)) throw new Error('import should use showOpenDialog');
+});
+await test('preload exposes the new app:* IPCs', () => {
+  for (const fn of ['getStorageStats:', 'getDataPaths:', 'resetSettings:', 'exportSettings:', 'importSettings:']) {
+    if (!preloadSrc3.includes(fn)) throw new Error(`preload missing: ${fn}`);
+  }
+});
+await test('SettingsPanel: Section wrapper is forwardRef + has scroll-mt for sticky anchor', () => {
+  if (!/React\.forwardRef\(function Section/.test(settingsSrc2)) throw new Error('Section not forwardRef');
+  if (!/scroll-mt-/.test(settingsSrc2)) throw new Error('scroll-mt class missing on Section');
 });
 
 // =====================================================================
