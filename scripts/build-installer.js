@@ -49,11 +49,21 @@ if (!fs.existsSync(packagedDir)) {
   bail(
     `Packaged app not found at:\n   ${packagedDir}\n\n` +
     'Run the packager first:\n' +
-    '   npx @electron/packager . "Veloxa Watermark Studio" --platform=win32 --arch=x64 --out=release --overwrite --asar',
+    '   npx @electron/packager . "Veloxa Watermark Studio" --platform=win32 --arch=x64 --out=release --overwrite --asar --icon=build/icon.ico',
   );
 }
 if (!fs.existsSync(issPath)) {
   bail(`Installer script not found: ${issPath}`);
+}
+// Generate the icon if it's missing. Earlier builds shipped without one
+// because SetupIconFile was blank — Inno fell back to its default icon
+// (no Veloxa branding on the installer .exe or the Programs entry).
+const iconPath = path.join(projectRoot, 'build', 'icon.ico');
+if (!fs.existsSync(iconPath)) {
+  console.log('Icon missing — running scripts/generate-icon.js to build it…');
+  const gen = spawnSync(process.execPath,
+    [path.join(__dirname, 'generate-icon.js')], { stdio: 'inherit' });
+  if (gen.status !== 0) bail('Icon generation failed; rerun manually with `node scripts/generate-icon.js`.');
 }
 
 const iscc = findISCC();

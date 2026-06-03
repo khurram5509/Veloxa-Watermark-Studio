@@ -247,6 +247,45 @@ await test('ProfilesPanel: search input has data-search-input attribute', () => 
 });
 
 // =====================================================================
+header('7. Branded installer icon (v2.6.1)');
+await test('build/icon.ico exists', () => {
+  const p = path.join(PROJ, 'build', 'icon.ico');
+  if (!fs.existsSync(p)) throw new Error('icon.ico missing');
+  // ICO header sanity: 6 bytes, [0,0,1,0,N,0]
+  const buf = fs.readFileSync(p);
+  if (buf.length < 100) throw new Error('icon.ico too small');
+  if (buf[0] !== 0 || buf[1] !== 0 || buf[2] !== 1 || buf[3] !== 0)
+    throw new Error('not a valid ICO header');
+  const count = buf.readUInt16LE(4);
+  if (count < 1) throw new Error(`ICO has ${count} frames (expected ≥1)`);
+});
+await test('build/icon.png exists', () => {
+  const p = path.join(PROJ, 'build', 'icon.png');
+  if (!fs.existsSync(p)) throw new Error('icon.png missing');
+  // PNG signature
+  const buf = fs.readFileSync(p);
+  const sig = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+  if (!buf.subarray(0, 8).equals(sig)) throw new Error('not a valid PNG');
+});
+await test('installer.iss references the icon as SetupIconFile', () => {
+  const issSrc = fs.readFileSync(path.join(PROJ, 'scripts', 'installer.iss'), 'utf8');
+  if (!/SetupIconFile=\.\.\\build\\icon\.ico/.test(issSrc))
+    throw new Error('SetupIconFile not wired to build/icon.ico');
+});
+await test('generate-icon.js script is committable + standalone', () => {
+  const p = path.join(PROJ, 'scripts', 'generate-icon.js');
+  if (!fs.existsSync(p)) throw new Error('generate-icon.js missing');
+  const src = fs.readFileSync(p, 'utf8');
+  // Must not depend on any non-builtin module — the whole point is no
+  // graphics deps. Allow node:fs / zlib / path only.
+  const reqs = (src.match(/require\(['"]([^'"]+)['"]\)/g) || []).map(m => m.match(/['"]([^'"]+)['"]/)[1]);
+  for (const r of reqs) {
+    if (!/^node:(fs|path|zlib)$/.test(r))
+      throw new Error(`icon generator should be dep-free; found require: ${r}`);
+  }
+});
+
+// =====================================================================
 header('4. Settings inline-result coverage');
 await test('SettingsPanel: InlineCheckResult handles every status', () => {
   const src = fs.readFileSync(path.join(PROJ, 'src', 'components', 'SettingsPanel.jsx'), 'utf8');
