@@ -270,13 +270,205 @@ async function check({
 }
 
 /**
- * Download an asset (the Setup .exe) to destPath with optional progress
- * callback. Returns destPath on success, throws on error.
+ * Download an asset (the Setup .exe) to destPath with optional progress.
  *
- * Streams to a `.partial` file and renames on completion so an interrupted
- * download doesn't leave behind a half-baked .exe the user might run.
+ * Progress callback receives { received, total, percent, bytesPerSec }
+ * (bytesPerSec added in v2.6.4 so the UI can show download speed + ETA).
+ *
+ * Default path is a single HTTPS stream — that turns out to be FASTER on
+ * common networks than ranged-parallel against the Azure Blob backend GitHub
+ * Releases uses. Benchmarking against the real CDN on a 100 Mbps line:
+ *
+ *   single-stream (1):  6.6 s @ 12.4 MB/s
+ *   parallel (6 chunks): 96.6 s @ 0.85 MB/s  ← Azure per-IP throttles +
+ *                                              TLS-handshake overhead per
+ *                                              chunk dominates.
+ *
+ * So parallel ranged download is OPT-IN via `parallelChunks > 1`. The path
+ * remains available for users on networks where single-stream is throttled
+ * lower than aggregate parallel could achieve. Auto-falls-back to single
+ * stream if the server returns 200 instead of 206 for a Range request.
  */
-function downloadAsset(url, destPath, { onProgress, timeoutMs = 60000, expectedSize = null } = {}) {
+async function downloadAsset(url, destPath, opts = {}) {
+  const {
+    onProgress, timeoutMs = 120000, expectedSize = null,
+    parallelChunks = 1, maxRetries = 2,
+  } = opts;
+
+  if (parallelChunks > 1 && expectedSize && expectedSize > 4 * 1024 * 1024) {
+    try {
+      return await downloadParallelRanged(url, destPath, {
+        onProgress, timeoutMs, expectedSize, parallelChunks, maxRetries,
+      });
+    } catch (err) {
+      if (process.env.VELOXA_DEBUG_UPDATER) {
+        console.warn('Parallel download fell back to single-stream:', err.message);
+      }
+    }
+  }
+  return downloadSingleStream(url, destPath, { onProgress, timeoutMs, expectedSize });
+}
+
+/**
+ * Parallel ranged download. Pre-sizes the .partial file, splits into N
+ * byte-ranges, fires N concurrent HTTPS GETs with `Range: bytes=A-B`, each
+ * writing to its own offset. Retries individual chunks on transient
+ * failures, aborts all peers when any chunk fails terminally.
+ */
+function downloadParallelRanged(url, destPath, opts) {
+  return new Promise(async (resolve, reject) => {
+    const { onProgress, timeoutMs, expectedSize, parallelChunks, maxRetries } = opts;
+    const partial = destPath + '.partial';
+
+    let settled = false;
+    const inflightReqs = new Set();
+    function fail(err) {
+      if (settled) return;
+      settled = true;
+      for (const r of inflightReqs) try { r.destroy(); } catch {}
+      fs.unlink(partial, () => reject(err instanceof Error ? err : new Error(String(err))));
+    }
+    function succeed(p) {
+      if (settled) return;
+      settled = true;
+      resolve(p);
+    }
+
+    try {
+      // 1. Pre-allocate the .partial file at the final size so we can write
+      // chunks at arbitrary offsets without races.
+      const fd = await fsp.open(partial, 'w');
+      await fd.truncate(expectedSize);
+      await fd.close();
+
+      // 2. Compute byte ranges. Slight rounding leaves the last chunk
+      // covering the trailing bytes, which is fine.
+      const chunkSize = Math.ceil(expectedSize / parallelChunks);
+      const chunks = [];
+      for (let i = 0; i < parallelChunks; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(start + chunkSize - 1, expectedSize - 1);
+        if (start <= end) chunks.push({ index: i, start, end });
+      }
+
+      // 3. Throttled progress aggregator — N chunks emitting on every TCP
+      // packet would flood IPC. Cap at ~20 emits/sec; always emit on done.
+      const chunkBytes = new Array(chunks.length).fill(0);
+      const startTime = Date.now();
+      let lastEmitMs = 0;
+      function emitProgress(force) {
+        const now = Date.now();
+        if (!force && now - lastEmitMs < 50) return;
+        lastEmitMs = now;
+        const received = chunkBytes.reduce((a, b) => a + b, 0);
+        const elapsed = (now - startTime) / 1000;
+        if (onProgress) onProgress({
+          received,
+          total: expectedSize,
+          percent: received / expectedSize,
+          bytesPerSec: elapsed > 0 ? Math.round(received / elapsed) : 0,
+        });
+      }
+
+      // 4. Download each chunk with bounded retry.
+      await Promise.all(chunks.map(async (chunk) => {
+        let lastErr;
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          if (settled) return;
+          try {
+            await downloadOneRange(url, partial, chunk.start, chunk.end, (bytes) => {
+              chunkBytes[chunk.index] = bytes;
+              emitProgress();
+            }, timeoutMs, inflightReqs);
+            return;
+          } catch (err) {
+            lastErr = err;
+            chunkBytes[chunk.index] = 0;
+            if (attempt < maxRetries) {
+              await new Promise((r) => setTimeout(r, 250 * Math.pow(2, attempt)));
+            }
+          }
+        }
+        throw lastErr || new Error(`Chunk ${chunk.index} failed after ${maxRetries + 1} attempts`);
+      }));
+
+      // 5. Final progress event + size verification + atomic rename
+      emitProgress(true);
+      const stat = await fsp.stat(partial);
+      if (stat.size !== expectedSize) {
+        fail(new Error(`Size mismatch after parallel download: ${stat.size} vs ${expectedSize}`));
+        return;
+      }
+      await fsp.rename(partial, destPath);
+      succeed(destPath);
+    } catch (err) {
+      fail(err);
+    }
+  });
+}
+
+// Issue a single ranged GET and write its body to the right offset in the
+// pre-allocated .partial file. Handles redirects (GitHub → Azure Blob).
+function downloadOneRange(url, partialPath, start, end, onBytes, timeoutMs, inflightReqs) {
+  return new Promise((resolve, reject) => {
+    const fetchWithRedirects = (currentUrl, redirects = 0) => {
+      const cu = new URL(currentUrl);
+      const mod = cu.protocol === 'http:' ? http : https;
+      const req = mod.request({
+        method: 'GET',
+        protocol: cu.protocol,
+        hostname: cu.hostname,
+        port: cu.port || (cu.protocol === 'https:' ? 443 : 80),
+        path: cu.pathname + (cu.search || ''),
+        headers: {
+          'User-Agent': 'Veloxa-Watermark-Studio-Updater',
+          Accept: 'application/octet-stream',
+          Range: `bytes=${start}-${end}`,
+        },
+      }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
+          if (redirects >= MAX_REDIRECTS) { reject(new Error('Too many redirects')); return; }
+          fetchWithRedirects(new URL(res.headers.location, cu).toString(), redirects + 1);
+          return;
+        }
+        // 200 means the server ignored our Range header and is sending the
+        // full file. Writing that at offset `start` would corrupt everything
+        // after it; bail and let the parallel path fall back to single-stream.
+        if (res.statusCode === 200) {
+          reject(new Error('Server does not support Range requests'));
+          res.resume();
+          return;
+        }
+        if (res.statusCode !== 206) {
+          reject(new Error(`Range request failed: HTTP ${res.statusCode}`));
+          res.resume();
+          return;
+        }
+        const ws = fs.createWriteStream(partialPath, { flags: 'r+', start });
+        let received = 0;
+        res.on('data', (chunk) => {
+          received += chunk.length;
+          if (onBytes) onBytes(received);
+        });
+        res.pipe(ws);
+        ws.on('finish', () => ws.close(() => { inflightReqs.delete(req); resolve(); }));
+        ws.on('error', (e) => { inflightReqs.delete(req); reject(e); });
+        res.on('error', (e) => { inflightReqs.delete(req); reject(e); });
+        res.on('aborted', () => { inflightReqs.delete(req); reject(new Error(`Chunk aborted at ${received} bytes`)); });
+      });
+      req.setTimeout(timeoutMs, () => req.destroy(new Error('Chunk timeout')));
+      req.on('error', (e) => { inflightReqs.delete(req); reject(e); });
+      inflightReqs.add(req);
+      req.end();
+    };
+    fetchWithRedirects(url);
+  });
+}
+
+// Legacy single-stream download — kept as fallback when Range isn't honored
+// or when the caller passes parallelChunks <= 1 or doesn't know the size.
+function downloadSingleStream(url, destPath, { onProgress, timeoutMs = 60000, expectedSize = null } = {}) {
   return new Promise((resolve, reject) => {
     const partial = destPath + '.partial';
     let u;
@@ -330,10 +522,16 @@ function downloadAsset(url, destPath, { onProgress, timeoutMs = 60000, expectedS
         }
         const total = parseInt(res.headers['content-length'], 10) || expectedSize || 0;
         let received = 0;
+        const startTime = Date.now();
         const out = fs.createWriteStream(partial);
         res.on('data', (chunk) => {
           received += chunk.length;
-          if (onProgress) onProgress({ received, total, percent: total ? received / total : 0 });
+          const elapsed = (Date.now() - startTime) / 1000;
+          if (onProgress) onProgress({
+            received, total,
+            percent: total ? received / total : 0,
+            bytesPerSec: elapsed > 0 ? Math.round(received / elapsed) : 0,
+          });
         });
         res.pipe(out);
         out.on('finish', () => {

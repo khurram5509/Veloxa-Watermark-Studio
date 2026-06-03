@@ -132,6 +132,42 @@ await test('downloadAsset streams to disk with progress events', async () => {
   if (!lastProgress || lastProgress.received !== fakePayload.length) throw new Error('final progress mismatch');
   if (lastProgress.percent !== 1) throw new Error('final percent != 1');
 });
+await test('downloadAsset progress event includes bytesPerSec (v2.6.4)', async () => {
+  const dest = path.join(tmp, 'setup-bps.exe');
+  let saw = null;
+  await updater.downloadAsset(`http://127.0.0.1:${dlPort}/setup.exe`, dest, {
+    onProgress: (p) => { if (typeof p.bytesPerSec === 'number') saw = p; },
+    expectedSize: fakePayload.length,
+  });
+  if (!saw) throw new Error('progress events missing bytesPerSec field');
+  if (saw.bytesPerSec < 0) throw new Error('bytesPerSec negative');
+});
+await test('downloadAsset default is single-stream (parallelChunks omitted)', async () => {
+  // The mock server doesn't support Range requests (no special handler for
+  // Range header → returns 200 with the full body). If the default was
+  // parallel, this would either trigger the fallback (slow but works) or
+  // misbehave. With default=1 the path is a clean single-stream — the same
+  // proven path that's worked since v2.5.0.
+  const dest = path.join(tmp, 'setup-default.exe');
+  await updater.downloadAsset(`http://127.0.0.1:${dlPort}/setup.exe`, dest, {
+    expectedSize: fakePayload.length,
+  });
+  if (fs.statSync(dest).size !== fakePayload.length) throw new Error('size mismatch');
+});
+await test('downloadAsset parallelChunks=2 still works (range fallback)', async () => {
+  // Mock server ignores Range header → returns 200. Our code detects this
+  // (rejects the chunk request with 'does not support Range') and falls
+  // back to single-stream. End result should match the single-stream
+  // baseline — same bytes on disk.
+  const dest = path.join(tmp, 'setup-parallel-fallback.exe');
+  await updater.downloadAsset(`http://127.0.0.1:${dlPort}/setup.exe`, dest, {
+    expectedSize: fakePayload.length,
+    parallelChunks: 2,
+  });
+  const got = fs.readFileSync(dest);
+  if (got.length !== fakePayload.length) throw new Error('size mismatch');
+  if (!got.equals(fakePayload)) throw new Error('bytes differ from source');
+});
 await test('downloadAsset follows 302 redirects (GitHub→S3 pattern)', async () => {
   const dest = path.join(tmp, 'redir.exe');
   await updater.downloadAsset(`http://127.0.0.1:${dlPort}/redirect`, dest, { expectedSize: fakePayload.length });

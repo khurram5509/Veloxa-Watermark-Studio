@@ -774,10 +774,13 @@ function InlineCheckResult({ status, info, error, progress, installerPath, onDow
   }
   if (status === 'downloading') {
     const pct = progress ? Math.round((progress.percent || 0) * 100) : 0;
+    const bps = (progress && progress.bytesPerSec) || 0;
+    const speedStr = bps > 0 ? `${(bps / 1024 / 1024).toFixed(1)} MB/s` : '';
     return (
       <div className={`${baseCls} bg-veloxa-600/10 border border-veloxa-500/30 text-veloxa-300`}>
         <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin"/>
         <span className="flex-1">Downloading{info && info.latest ? <> v{info.latest}</> : null}…</span>
+        {speedStr && <span className="font-mono text-[10px] text-muted">{speedStr}</span>}
         <span className="font-mono">{pct}%</span>
       </div>
     );

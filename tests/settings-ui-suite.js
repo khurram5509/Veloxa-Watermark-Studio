@@ -366,6 +366,25 @@ await test('SettingsPanel: Section wrapper is forwardRef + has scroll-mt for sti
 });
 
 // =====================================================================
+header('9. Download speed/ETA UI (v2.6.4)');
+const ubSrc = fs.readFileSync(path.join(PROJ, 'src', 'components', 'UpdateBanner.jsx'), 'utf8');
+const spSrc = fs.readFileSync(path.join(PROJ, 'src', 'components', 'SettingsPanel.jsx'), 'utf8');
+await test('UpdateBanner Downloading row shows bytesPerSec as MB/s', () => {
+  if (!/bytesPerSec/.test(ubSrc)) throw new Error('UpdateBanner does not read bytesPerSec');
+  if (!/MB\/s/.test(ubSrc)) throw new Error('UpdateBanner does not render MB/s string');
+});
+await test('UpdateBanner shows an ETA "Xs left" or "Xm left"', () => {
+  if (!/left/.test(ubSrc) || !/remaining/.test(ubSrc)) throw new Error('ETA not computed');
+});
+await test('SettingsPanel InlineCheckResult downloading row shows speed', () => {
+  // Look specifically for the InlineCheckResult `if (...) { ... }` branch
+  // (not the unrelated `const downloading = …` flag in UpdatesSection).
+  const m = spSrc.match(/if \(status === 'downloading'\) \{[\s\S]{0,800}?return \(/);
+  if (!m) throw new Error('downloading branch not found');
+  if (!/bytesPerSec/.test(m[0])) throw new Error('downloading branch does not read bytesPerSec');
+});
+
+// =====================================================================
 header('4. Settings inline-result coverage');
 await test('SettingsPanel: InlineCheckResult handles every status', () => {
   const src = fs.readFileSync(path.join(PROJ, 'src', 'components', 'SettingsPanel.jsx'), 'utf8');

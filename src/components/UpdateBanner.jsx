@@ -116,6 +116,16 @@ function Downloading({ latest, progress, onLater }) {
   const pctStr = `${Math.round(pct * 100)}%`;
   const receivedMb = progress && progress.received ? (progress.received / 1024 / 1024).toFixed(1) : '0.0';
   const totalMb = progress && progress.total ? (progress.total / 1024 / 1024).toFixed(1) : '?';
+  // v2.6.4: bytesPerSec is reported by the engine — show speed + ETA so a slow
+  // download doesn't look hung.
+  const bps = (progress && progress.bytesPerSec) || 0;
+  const speedStr = bps > 0 ? `${(bps / 1024 / 1024).toFixed(1)} MB/s` : '';
+  const remaining = (progress && progress.total && bps > 0)
+    ? Math.max(0, (progress.total - progress.received) / bps)
+    : 0;
+  const etaStr = remaining > 0
+    ? remaining < 60 ? `${Math.round(remaining)}s left` : `${Math.round(remaining / 60)}m left`
+    : '';
   return (
     <div className="surface-1 rounded-2xl px-5 py-3 flex items-center gap-4 border-veloxa-500/30 ring-1 ring-veloxa-500/30">
       <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-veloxa-600/15 text-veloxa-400 border border-veloxa-500/30">
@@ -128,7 +138,11 @@ function Downloading({ latest, progress, onLater }) {
         <div className="mt-1 h-1.5 rounded-full bg-ink-700 overflow-hidden">
           <div className="h-full bg-veloxa-500 transition-all" style={{ width: pctStr }}/>
         </div>
-        <div className="text-xs text-muted mt-1">{receivedMb} MB / {totalMb} MB · {pctStr}</div>
+        <div className="text-xs text-muted mt-1 flex items-center gap-2 flex-wrap">
+          <span>{receivedMb} MB / {totalMb} MB · {pctStr}</span>
+          {speedStr && <span className="text-veloxa-300">· {speedStr}</span>}
+          {etaStr && <span>· {etaStr}</span>}
+        </div>
       </div>
       <button onClick={onLater} className="btn-ghost p-1.5" title="Hide">
         <XIcon className="w-4 h-4"/>
