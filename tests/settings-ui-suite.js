@@ -377,11 +377,68 @@ await test('UpdateBanner shows an ETA "Xs left" or "Xm left"', () => {
   if (!/left/.test(ubSrc) || !/remaining/.test(ubSrc)) throw new Error('ETA not computed');
 });
 await test('SettingsPanel InlineCheckResult downloading row shows speed', () => {
-  // Look specifically for the InlineCheckResult `if (...) { ... }` branch
-  // (not the unrelated `const downloading = …` flag in UpdatesSection).
   const m = spSrc.match(/if \(status === 'downloading'\) \{[\s\S]{0,800}?return \(/);
   if (!m) throw new Error('downloading branch not found');
   if (!/bytesPerSec/.test(m[0])) throw new Error('downloading branch does not read bytesPerSec');
+});
+
+// =====================================================================
+header('10. Multi-resolution / DPI scaling / multi-monitor (v2.7.0)');
+const mainSrc = fs.readFileSync(path.join(PROJ, 'electron', 'main.js'), 'utf8');
+const sidebarSrc = fs.readFileSync(path.join(PROJ, 'src', 'components', 'Sidebar.jsx'), 'utf8');
+const appSrc = fs.readFileSync(path.join(PROJ, 'src', 'App.jsx'), 'utf8');
+const cssSrc = fs.readFileSync(path.join(PROJ, 'src', 'index.css'), 'utf8');
+
+await test('main.js: minWidth lowered to 920, minHeight to 600', () => {
+  if (!/minWidth:\s*920\b/.test(mainSrc)) throw new Error('minWidth should be 920');
+  if (!/minHeight:\s*600\b/.test(mainSrc)) throw new Error('minHeight should be 600');
+});
+await test('main.js: safeWindowBounds validates against current displays', () => {
+  if (!/function safeWindowBounds/.test(mainSrc))
+    throw new Error('safeWindowBounds helper missing');
+  if (!/getAllDisplays|getDisplayNearestPoint/.test(mainSrc))
+    throw new Error('helper does not consult screen.getAllDisplays / getDisplayNearestPoint');
+});
+await test('main.js: re-clamps bounds on display add/remove/metrics-changed', () => {
+  for (const ev of ['display-added', 'display-removed', 'display-metrics-changed']) {
+    if (!new RegExp(`screen\\.on\\(['"]${ev}['"]`).test(mainSrc))
+      throw new Error(`screen.on('${ev}', …) missing`);
+  }
+});
+await test('Sidebar: responsive — icon-only below xl, labeled at xl+', () => {
+  // The sidebar should declare BOTH widths in a single class string.
+  if (!/w-14 xl:w-56/.test(sidebarSrc))
+    throw new Error('sidebar width should be `w-14 xl:w-56`');
+  // Nav-item labels should be hidden at narrow widths.
+  if (!/hidden xl:inline/.test(sidebarSrc))
+    throw new Error('sidebar should hide labels at narrow widths');
+});
+await test('Dashboard: StatCard grid responsive (grid-cols-2 → lg:grid-cols-4)', () => {
+  if (!/grid-cols-2 lg:grid-cols-4/.test(appSrc))
+    throw new Error('stat card grid not responsive');
+});
+await test('Dashboard: main work grid responsive (single column → lg:grid-cols-3)', () => {
+  if (!/grid-cols-1 lg:grid-cols-3/.test(appSrc))
+    throw new Error('main work grid not responsive');
+});
+await test('SettingsPanel: nav rail collapses (w-12 → lg:w-52)', () => {
+  if (!/w-12 lg:w-52/.test(settingsSrc2))
+    throw new Error('settings nav rail not responsive');
+});
+await test('index.css anchors font-size to 16px so DPI scaling is deterministic', () => {
+  if (!/font-size:\s*16px/.test(cssSrc))
+    throw new Error('explicit 16px base font-size missing — DPI scaling math breaks otherwise');
+});
+await test('index.css enables font smoothing for non-integer DPI scales', () => {
+  if (!/-webkit-font-smoothing:\s*antialiased/.test(cssSrc))
+    throw new Error('font smoothing missing');
+});
+await test('ProfileEditor modal scales padding + grid responsively', () => {
+  const peSrc = fs.readFileSync(path.join(PROJ, 'src', 'components', 'ProfileEditor.jsx'), 'utf8');
+  if (!/p-3 sm:p-4 lg:p-6/.test(peSrc))
+    throw new Error('modal padding not responsive');
+  if (!/grid-cols-1 lg:grid-cols-2/.test(peSrc))
+    throw new Error('modal body grid not responsive');
 });
 
 // =====================================================================

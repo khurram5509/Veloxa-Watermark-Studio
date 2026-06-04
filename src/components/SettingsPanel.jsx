@@ -68,11 +68,11 @@ export default function SettingsPanel() {
   const isVisible = (id) => visibleSections.some((s) => s.id === id);
 
   return (
-    <div className="h-full flex gap-5">
-      {/* ── Left rail nav ─────────────────────────────────────────── */}
-      <aside className="w-52 shrink-0 self-start sticky top-0">
-        <div className="surface-1 rounded-2xl p-3">
-          <div className="text-[10px] uppercase tracking-widest text-muted mb-2 px-2">Sections</div>
+    <div className="h-full flex gap-3 lg:gap-5">
+      {/* ── Left rail nav — icons-only when < lg, labels at lg+ ───── */}
+      <aside className="w-12 lg:w-52 shrink-0 self-start sticky top-0 transition-[width] duration-150">
+        <div className="surface-1 rounded-2xl p-1.5 lg:p-3">
+          <div className="text-[10px] uppercase tracking-widest text-muted mb-2 px-2 hidden lg:block">Sections</div>
           <nav className="space-y-0.5">
             {SECTIONS.map((s) => {
               const Icon = s.icon;
@@ -82,7 +82,8 @@ export default function SettingsPanel() {
                 <button
                   key={s.id}
                   onClick={() => jumpTo(s.id)}
-                  className={`w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors ${
+                  title={s.title}
+                  className={`w-full text-left flex items-center justify-center lg:justify-start gap-2 px-2 py-2 lg:py-1.5 rounded-lg text-xs transition-colors ${
                     active
                       ? 'bg-veloxa-600/20 text-veloxa-200 font-semibold'
                       : dimmed
@@ -91,8 +92,8 @@ export default function SettingsPanel() {
                   }`}
                   disabled={dimmed}
                 >
-                  <Icon className={`w-3.5 h-3.5 ${active ? 'text-veloxa-300' : 'text-muted'}`}/>
-                  <span className="truncate">{s.title}</span>
+                  <Icon className={`w-3.5 h-3.5 shrink-0 ${active ? 'text-veloxa-300' : 'text-muted'}`}/>
+                  <span className="truncate hidden lg:inline">{s.title}</span>
                 </button>
               );
             })}
@@ -101,7 +102,7 @@ export default function SettingsPanel() {
       </aside>
 
       {/* ── Main column ──────────────────────────────────────────── */}
-      <div className="flex-1 min-w-0 surface-1 rounded-2xl p-6 overflow-y-auto">
+      <div className="flex-1 min-w-0 surface-1 rounded-2xl p-4 lg:p-6 overflow-y-auto">
         {/* Sticky header: title · search · version · global actions */}
         <div className="sticky top-0 z-10 -mx-6 -mt-6 px-6 pt-6 pb-4 mb-2 bg-ink-900/95 backdrop-blur supports-[backdrop-filter]:bg-ink-900/80 border-b border-ink-600/30">
           <div className="flex items-center justify-between gap-3 mb-3">

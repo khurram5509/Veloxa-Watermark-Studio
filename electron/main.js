@@ -1,9 +1,55 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, Notification, shell, Tray } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, Notification, shell, Tray, screen } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { registerIpcHandlers } = require('./ipc-handlers');
 
 const isDev = process.env.NODE_ENV === 'development';
+
+/**
+ * Validate previously-saved window bounds against the current display layout.
+ *
+ * Cases handled:
+ *   - The monitor those bounds were on has been disconnected → return null
+ *     so we fall back to default centering on the primary display.
+ *   - The window is sized larger than any current display (e.g. user
+ *     unplugged their 4K and is on a 1080p laptop) → clamp to fit.
+ *   - The window position would be partially off-screen → re-center on the
+ *     closest display so the title bar stays grabbable.
+ *
+ * All of these manifested as "app opens off-screen, can't be moved" before.
+ */
+function safeWindowBounds(saved) {
+  if (!saved) return null;
+  if (!Number.isFinite(saved.width) || !Number.isFinite(saved.height)) return null;
+
+  // Find the display the saved center point belongs to (or closest match).
+  const cx = (saved.x || 0) + saved.width / 2;
+  const cy = (saved.y || 0) + saved.height / 2;
+  const displays = screen.getAllDisplays();
+  if (!displays.length) return null;
+  const match = screen.getDisplayNearestPoint({ x: cx, y: cy }) || displays[0];
+  const work = match.workArea;
+
+  // Clamp size to fit the matched display (90% of work area as a ceiling).
+  let width  = Math.min(saved.width,  Math.floor(work.width  * 0.95));
+  let height = Math.min(saved.height, Math.floor(work.height * 0.95));
+  // Don't go below our hard minimums.
+  width  = Math.max(width,  920);
+  height = Math.max(height, 600);
+
+  // Clamp position so at least 80px of the title bar is on-screen — that's
+  // enough for the user to drag the window if it ends up partially clipped.
+  const minOnscreen = 80;
+  let x = saved.x;
+  let y = saved.y;
+  if (!Number.isFinite(x) || x + width  < work.x + minOnscreen || x > work.x + work.width  - minOnscreen) {
+    x = Math.round(work.x + (work.width  - width)  / 2);
+  }
+  if (!Number.isFinite(y) || y + height < work.y + minOnscreen || y > work.y + work.height - minOnscreen) {
+    y = Math.round(work.y + (work.height - height) / 2);
+  }
+  return { x, y, width, height, isMaximized: !!saved.isMaximized };
+}
 
 let mainWindow = null;
 let tray = null;
@@ -22,17 +68,21 @@ process.on('uncaughtException', (err) => logFatal('uncaughtException', err));
 process.on('unhandledRejection', (err) => logFatal('unhandledRejection', err));
 
 function createMainWindow() {
-  // Restore previous window bounds if any
+  // Restore previous window bounds if any — validated against current display
+  // layout so an unplugged monitor doesn't strand the window off-screen.
   const settingsModule = require('../engine/settings');
-  const savedBounds = settingsModule.get().windowBounds;
+  const savedBounds = safeWindowBounds(settingsModule.get().windowBounds);
 
+  // Sized to fit HD (1280×720) @ 150% scaling = 853×480 effective pixels —
+  // anything we ship below this risks unusable layouts. 920×600 fits there
+  // comfortably while still being usable on a 4K display at 200% scale.
   mainWindow = new BrowserWindow({
     width: (savedBounds && savedBounds.width) || 1400,
     height: (savedBounds && savedBounds.height) || 900,
-    x: savedBounds && Number.isFinite(savedBounds.x) ? savedBounds.x : undefined,
-    y: savedBounds && Number.isFinite(savedBounds.y) ? savedBounds.y : undefined,
-    minWidth: 1080,
-    minHeight: 680,
+    x: savedBounds ? savedBounds.x : undefined,
+    y: savedBounds ? savedBounds.y : undefined,
+    minWidth: 920,
+    minHeight: 600,
     backgroundColor: '#0b0d12',
     title: 'Veloxa Watermark Studio',
     frame: false,
@@ -43,9 +93,33 @@ function createMainWindow() {
       nodeIntegration: false,
       sandbox: false,
       spellcheck: false,
+      // Lets the renderer apply per-display zoom factors (CSS rems then scale
+      // appropriately for 100/125/150/200% Windows DPI settings).
+      zoomFactor: 1.0,
     },
   });
   if (savedBounds && savedBounds.isMaximized) mainWindow.maximize();
+
+  // If a display is added/removed/changed scaling while we're open, re-clamp
+  // our bounds into the new layout so we don't end up off-screen. Debounced
+  // to avoid thrash when the user is plugging cables.
+  let displayRecheckTimer = null;
+  const reclampToCurrentDisplays = () => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMaximized()) return;
+    if (displayRecheckTimer) clearTimeout(displayRecheckTimer);
+    displayRecheckTimer = setTimeout(() => {
+      try {
+        const cur = mainWindow.getBounds();
+        const safe = safeWindowBounds({ ...cur, isMaximized: false });
+        if (safe && (safe.x !== cur.x || safe.y !== cur.y || safe.width !== cur.width || safe.height !== cur.height)) {
+          mainWindow.setBounds({ x: safe.x, y: safe.y, width: safe.width, height: safe.height });
+        }
+      } catch {}
+    }, 250);
+  };
+  screen.on('display-added',      reclampToCurrentDisplays);
+  screen.on('display-removed',    reclampToCurrentDisplays);
+  screen.on('display-metrics-changed', reclampToCurrentDisplays);
 
   // Persist window state on resize / move / maximize toggles, debounced.
   let saveTimer = null;

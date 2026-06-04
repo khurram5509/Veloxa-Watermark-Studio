@@ -248,7 +248,7 @@ export default function ProfileEditor() {
     <AnimatePresence>
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6"
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 lg:p-6"
         // Backdrop click is intentionally a no-op: this form holds unsaved work.
         // User must click Cancel/X to close (with confirm if dirty).
       >
@@ -258,7 +258,7 @@ export default function ProfileEditor() {
           exit={{ scale: 0.96, y: 20, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 320, damping: 30 }}
           onClick={(e) => e.stopPropagation()}
-          className="surface-1 rounded-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col"
+          className="surface-1 rounded-2xl w-full max-w-3xl max-h-[92vh] sm:max-h-[88vh] overflow-hidden flex flex-col"
         >
           <div className="flex items-center justify-between px-5 py-3 border-b border-ink-600/40">
             <h2 className="text-sm font-semibold flex items-center gap-2">
@@ -293,7 +293,7 @@ export default function ProfileEditor() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-auto p-5 grid grid-cols-2 gap-5">
+          <div className="flex-1 overflow-auto p-3 sm:p-4 lg:p-5 grid grid-cols-1 lg:grid-cols-2 gap-3 lg:gap-5">
             {/* Left: form */}
             <div className="space-y-4">
               <div>

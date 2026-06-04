@@ -145,26 +145,30 @@ export default function App() {
 
 function Dashboard({ canProcess, selectedProfile, onProcess }) {
   const { queue, pendingFiles } = useStore();
+  // Stat cards: 2×2 grid on narrow widths (saves vertical space at ≤ ~1100px),
+  // single row of 4 once we have room. The main work area collapses from a
+  // 2/1 split to single column when narrower than `lg` so the drop zone and
+  // queue always have at least 480 px of width before stacking.
   return (
-    <div className="h-full flex flex-col p-5 gap-5">
+    <div className="h-full flex flex-col p-3 sm:p-4 lg:p-5 gap-3 sm:gap-4 lg:gap-5 overflow-y-auto">
       <UpdateBanner/>
       <ResumeBanner/>
       <Header pending={pendingFiles.length} canProcess={canProcess} selectedProfile={selectedProfile} onProcess={onProcess}/>
       <RecentProfiles/>
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 lg:gap-3">
         <StatCard icon={Files} label="In Queue" value={queue.counts.total} accent="ink"/>
         <StatCard icon={Activity} label="Processing" value={queue.counts.running + queue.counts.pending} accent="veloxa"/>
         <StatCard icon={CheckCircle2} label="Completed" value={queue.counts.success} accent="green"/>
         <StatCard icon={XCircle} label="Failed" value={queue.counts.failed} accent="red"/>
       </div>
 
-      <div className="grid grid-cols-3 gap-5 flex-1 min-h-0">
-        <div className="col-span-2 flex flex-col gap-5 min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-5 flex-1 min-h-0">
+        <div className="lg:col-span-2 flex flex-col gap-3 sm:gap-4 lg:gap-5 min-h-0">
           <DropZone/>
           <QueuePanel/>
         </div>
-        <div className="flex flex-col gap-5 min-h-0">
+        <div className="flex flex-col gap-3 sm:gap-4 lg:gap-5 min-h-0">
           <ProfilesPanel compact/>
           <LogsPanel compact/>
         </div>
@@ -375,9 +379,9 @@ function ProfilesView() {
   }, [profiles, selectedProfileId]);
 
   return (
-    <div className={`h-full p-5 grid grid-cols-3 gap-5 transition-colors ${dragActive ? 'bg-veloxa-600/5' : ''}`}>
-      <div className="col-span-2"><ProfilesPanel/></div>
-      <div className="surface-1 rounded-2xl p-5">
+    <div className={`h-full p-3 sm:p-4 lg:p-5 grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-5 overflow-y-auto transition-colors ${dragActive ? 'bg-veloxa-600/5' : ''}`}>
+      <div className="lg:col-span-2 min-h-0"><ProfilesPanel/></div>
+      <div className="surface-1 rounded-2xl p-4 lg:p-5">
         <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
           <Layers className="w-4 h-4 text-veloxa-400"/> About profiles
         </h3>
@@ -404,7 +408,7 @@ function ProfilesView() {
 
 function LogsView() {
   return (
-    <div className="h-full p-5">
+    <div className="h-full p-3 sm:p-4 lg:p-5 min-h-0">
       <LogsPanel/>
     </div>
   );
@@ -414,7 +418,7 @@ function SettingsView() {
   // overflow-hidden on the outer wrapper so the SettingsPanel's main column
   // owns the scrollbar — that's what the sticky left-rail nav anchors to.
   return (
-    <div className="h-full p-5 overflow-hidden">
+    <div className="h-full p-3 sm:p-4 lg:p-5 overflow-hidden">
       <SettingsPanel/>
     </div>
   );

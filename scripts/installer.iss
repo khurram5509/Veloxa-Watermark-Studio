@@ -16,7 +16,7 @@
 
 #define MyAppName        "Veloxa Watermark Studio"
 #define MyAppShortName   "VeloxaWatermarkStudio"
-#define MyAppVersion     "2.6.4"
+#define MyAppVersion     "2.7.0"
 #define MyAppPublisher   "Veloxa"
 #define MyAppURL         "https://veloxa.app"
 #define MyAppExeName     "Veloxa Watermark Studio.exe"
