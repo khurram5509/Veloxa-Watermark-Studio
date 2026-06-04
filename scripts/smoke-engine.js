@@ -230,13 +230,21 @@ const settings = { pdfCompression: 'standard' };
     const out = path.join(tmp, 'out_multi.docx');
     await processDocx({ inputPath: inp, outputPath: out, profile });
     const docXmlOut = new PizZip(fs.readFileSync(out)).file('word/document.xml').asText();
+    // v2.7.2: we now inject 3 headerReference types (default / first / even)
+    // per section so cover-page docs (<w:titlePg/>) still get the watermark
+    // on page 1. 2 sections × 3 refs = 6.
     const refCount = (docXmlOut.match(/<w:headerReference[^>]*r:id="rIdVeloxaHeader"/g) || []).length;
-    if (refCount !== 2)
-      throw new Error(`headerReference not injected into all sectPr — got ${refCount}, expected 2 (one self-closing + one open)`);
+    if (refCount !== 6)
+      throw new Error(`headerReference not injected into all sectPr — got ${refCount}, expected 6 (2 sectPr × 3 types: default/first/even)`);
+    // Each type must appear at least twice (once per section).
+    for (const type of ['default', 'first', 'even']) {
+      const typeCount = (docXmlOut.match(new RegExp(`w:type="${type}"`, 'g')) || []).length;
+      if (typeCount < 2) throw new Error(`expected 2 refs of type=${type}, got ${typeCount}`);
+    }
     // Self-closing should now be expanded into <w:sectPr>...</w:sectPr>
     if (/<w:sectPr\/>/.test(docXmlOut))
       throw new Error('self-closing <w:sectPr/> still present — should have been expanded');
-    console.log('✔ DOCX multi-section — headerRef injected into both sectPr (self-closing + open)');
+    console.log('✔ DOCX multi-section — 6 headerRefs (default/first/even × 2 sections) injected');
     pass++;
   } catch (e) { console.error('✘ DOCX multi-section FAILED:', e.message); fail++; }
 

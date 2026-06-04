@@ -256,6 +256,48 @@ await test('DOCX page sizes: Letter / A4 / Legal all positioned correctly', asyn
   const mT = parseFloat(hdr.match(/margin-top:([-\d.]+)pt/)[1]);
   if (Math.abs(mT - 880) > 0.1) throw new Error('Legal bottom-left: ' + mT);
 });
+await test('DOCX watermark renders ON TOP (positive z-index, not behind text)', async () => {
+  const out = path.join(tmp, 'docx_ontop.docx');
+  await processDocx({ inputPath: blankDocx, outputPath: out,
+    profile: { name: 'P', type: 'text', text: 'X', position: 'center' } });
+  const hdr = new PizZip(fs.readFileSync(out)).file('word/header_veloxa.xml').asText();
+  // Negative z-index = behind text (the bug). Positive z-index = on top.
+  // Match z-index:<digits> WITHOUT a leading minus.
+  const m = hdr.match(/z-index:(-?\d+)/);
+  if (!m) throw new Error('no z-index in watermark VML');
+  if (m[1].startsWith('-')) throw new Error(`watermark z-index ${m[1]} is negative — would render behind text`);
+});
+await test('DOCX with titlePg (Different First Page) gets watermark on page 1', async () => {
+  // Build a docx that uses <w:titlePg/> — Word's "Different First Page"
+  // setting. Without the v2.7.2 fix, only the default header carries our
+  // watermark and page 1 silently goes blank.
+  const z = new PizZip();
+  z.file('[Content_Types].xml', `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+  z.file('_rels/.rels', `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+  z.file('word/document.xml', `<?xml version="1.0"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body>
+<w:p><w:r><w:t>Body</w:t></w:r></w:p>
+<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:titlePg/></w:sectPr>
+</w:body></w:document>`);
+  const inp = path.join(tmp, 'titlepg.docx');
+  fs.writeFileSync(inp, z.generate({ type: 'nodebuffer' }));
+  const out = path.join(tmp, 'titlepg_out.docx');
+  await processDocx({ inputPath: inp, outputPath: out,
+    profile: { name: 'P', type: 'text', text: 'X', position: 'center' } });
+  const docXml = new PizZip(fs.readFileSync(out)).file('word/document.xml').asText();
+  // Must reference our header part under all 3 type values so page 1 (which
+  // uses "first" when titlePg is set) still pulls the watermark.
+  for (const type of ['default', 'first', 'even']) {
+    if (!new RegExp(`w:type="${type}"`).test(docXml))
+      throw new Error(`titlePg doc missing w:type="${type}" — page 1 would skip watermark`);
+  }
+});
+
 await test('DOCX XML escapes special chars', async () => {
   const out = path.join(tmp, 'docx_esc.docx');
   await processDocx({ inputPath: blankDocx, outputPath: out,
@@ -285,8 +327,15 @@ await test('DOCX multi-section: every sectPr gets headerReference', async () => 
   await processDocx({ inputPath: inp, outputPath: out,
     profile: { name: 'P', type: 'text', text: 'X', position: 'center' } });
   const docXml = new PizZip(fs.readFileSync(out)).file('word/document.xml').asText();
+  // v2.7.2: we now inject 3 headerReference types (default / first / even)
+  // per section so docs with <w:titlePg/> still show the watermark on page 1.
+  // 2 sections × 3 refs/each = 6.
   const refs = (docXml.match(/headerReference/g) || []).length;
-  if (refs !== 2) throw new Error('expected 2, got ' + refs);
+  if (refs !== 6) throw new Error('expected 6 headerReferences (2 sections × 3 types), got ' + refs);
+  // Each type must be present at least once.
+  for (const type of ['default', 'first', 'even']) {
+    if (!new RegExp(`w:type="${type}"`).test(docXml)) throw new Error(`missing w:type="${type}"`);
+  }
 });
 
 // =====================================================================

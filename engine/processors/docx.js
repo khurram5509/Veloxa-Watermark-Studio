@@ -155,7 +155,7 @@ function buildTextWatermarkVml(profile, pageSize) {
             <v:textpath on="t" fitshape="t"/>
           </v:shapetype>
           <v:shape id="vxWatermark" type="#vxWmShape"
-                   style="position:absolute;margin-left:${marginLeft}pt;margin-top:${marginTop}pt;width:${widthPt}pt;height:${heightPt}pt;rotation:${rotation};z-index:-251658752;mso-position-horizontal-relative:page;mso-position-vertical-relative:page"
+                   style="position:absolute;margin-left:${marginLeft}pt;margin-top:${marginTop}pt;width:${widthPt}pt;height:${heightPt}pt;rotation:${rotation};z-index:251658752;mso-position-horizontal-relative:page;mso-position-vertical-relative:page"
                    fillcolor="${color}" stroked="f">
             <v:fill opacity="${opacityPct}"/>
             <v:textpath style="font-family:&quot;${fontFamily}&quot;;font-size:${size}pt;font-style:${italic};font-weight:${bold};v-text-align:center" string="${text}"/>
@@ -198,7 +198,7 @@ function buildImageWatermarkVml(profile, relId, imgWidth, imgHeight, pageSize) {
         <w:rPr><w:noProof/></w:rPr>
         <w:pict>
           <v:shape id="vxWatermarkImg" type="#_x0000_t75"
-                   style="position:absolute;margin-left:${marginLeft}pt;margin-top:${marginTop}pt;width:${w}pt;height:${h}pt;rotation:${rotation};z-index:-251658751;mso-position-horizontal-relative:page;mso-position-vertical-relative:page">
+                   style="position:absolute;margin-left:${marginLeft}pt;margin-top:${marginTop}pt;width:${w}pt;height:${h}pt;rotation:${rotation};z-index:251658751;mso-position-horizontal-relative:page;mso-position-vertical-relative:page">
             <v:imagedata r:id="${relId}" gain="${opacityPct}"/>
           </v:shape>
         </w:pict>
@@ -241,26 +241,40 @@ function ensureSectionHeaderRef(zip, headerRelId) {
   if (!docXml) return;
   if (docXml.includes(`r:id="${headerRelId}"`)) return;
 
-  const headerRef = `<w:headerReference r:id="${headerRelId}" w:type="default" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>`;
+  // Word picks one of three header parts per page:
+  //   - `first` → page 1 when <w:titlePg/> is set ("Different First Page")
+  //   - `even`  → even pages when <w:evenAndOddHeaders/> is set
+  //   - `default` → everything else
+  //
+  // Previously we only injected the `default` headerReference, so a document
+  // with a cover page (titlePg) silently lost its watermark on page 1 — the
+  // exact bug a user just reported. Now we inject all three pointing at the
+  // SAME header part, so whichever variant Word chooses still shows the
+  // watermark.
+  const headerRefs = [
+    `<w:headerReference r:id="${headerRelId}" w:type="default" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>`,
+    `<w:headerReference r:id="${headerRelId}" w:type="first" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>`,
+    `<w:headerReference r:id="${headerRelId}" w:type="even" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>`,
+  ].join('');
 
   // Match every <w:sectPr ...> opening tag AND every self-closing <w:sectPr/>.
-  // Multi-section docs have multiple sectPr; each needs its own headerReference
+  // Multi-section docs have multiple sectPr; each needs its own headerRefs
   // or the watermark shows up only in the first section.
   const sectPrRegex = /<w:sectPr(\s[^>]*)?\s*(\/)?>/g;
   let matched = false;
   let updated = docXml.replace(sectPrRegex, (match, attrs, selfClose) => {
     matched = true;
     if (selfClose) {
-      // <w:sectPr/> → <w:sectPr><headerRef/></w:sectPr>
-      return `<w:sectPr${attrs || ''}>${headerRef}</w:sectPr>`;
+      // <w:sectPr/> → <w:sectPr>{headerRefs}</w:sectPr>
+      return `<w:sectPr${attrs || ''}>${headerRefs}</w:sectPr>`;
     }
-    // <w:sectPr ...> → <w:sectPr ...><headerRef/>
-    return `${match}${headerRef}`;
+    // <w:sectPr ...> → <w:sectPr ...>{headerRefs}
+    return `${match}${headerRefs}`;
   });
 
   // Fallback: minimal docs without any sectPr — synthesize one before </w:body>.
   if (!matched) {
-    updated = docXml.replace('</w:body>', `<w:sectPr>${headerRef}</w:sectPr></w:body>`);
+    updated = docXml.replace('</w:body>', `<w:sectPr>${headerRefs}</w:sectPr></w:body>`);
   }
   zip.file(documentPath, updated);
 }
