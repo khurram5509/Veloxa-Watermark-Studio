@@ -442,6 +442,57 @@ await test('ProfileEditor modal scales padding + grid responsively', () => {
 });
 
 // =====================================================================
+header('11. Low-resource hardening (v2.7.1)');
+const mainSrc2 = fs.readFileSync(path.join(PROJ, 'electron', 'main.js'), 'utf8');
+const appSrc2 = fs.readFileSync(path.join(PROJ, 'src', 'App.jsx'), 'utf8');
+
+await test('Single-instance lock requested', () => {
+  if (!/requestSingleInstanceLock\(\)/.test(mainSrc2))
+    throw new Error('requestSingleInstanceLock missing');
+});
+await test('Second-instance handler shows "already running" notification', () => {
+  // The handler should construct a Notification with body containing
+  // "already running" so the user knows what happened.
+  if (!/new Notification\(\{[\s\S]{0,300}?already running/.test(mainSrc2))
+    throw new Error('notification body does not say "already running"');
+});
+await test('Second-instance handler focuses the existing window', () => {
+  const m = mainSrc2.match(/app\.on\('second-instance'[\s\S]{0,1500}\}\);/);
+  if (!m) throw new Error('second-instance handler not found');
+  if (!/mainWindow\.focus\(\)/.test(m[0])) throw new Error('does not call focus()');
+  if (!/isMinimized\(\)/.test(m[0])) throw new Error('does not handle minimized state');
+});
+await test('Second-instance handler flashes the taskbar', () => {
+  if (!/flashFrame\(true\)/.test(mainSrc2))
+    throw new Error('flashFrame call missing — second instance is silent');
+});
+await test('Converter probe deferred via setTimeout (not blocking startup paint)', () => {
+  // Match `setTimeout(() => { try { ... converter.status() ... }, NN)`
+  if (!/setTimeout\(\s*\(\)\s*=>\s*\{[\s\S]{0,400}?converter\.status\(\)/.test(mainSrc2))
+    throw new Error('converter.status() should be wrapped in setTimeout for deferred init');
+});
+await test('Heavy components are React.lazy-loaded', () => {
+  for (const c of ['ProfileEditor', 'HelpModal', 'FolderImportModal', 'SettingsPanel']) {
+    if (!new RegExp(`const ${c}[\\s\\S]{0,80}?lazy\\(`).test(appSrc2))
+      throw new Error(`${c} not wrapped in lazy()`);
+  }
+});
+await test('Lazy components live inside <Suspense>', () => {
+  // Match either `import { Suspense ... } from 'react'` or
+  //              `import React, { ... Suspense ... } from 'react'`
+  if (!/from ['"]react['"]/.test(appSrc2) || !/\bSuspense\b/.test(appSrc2))
+    throw new Error('Suspense not imported');
+  if (!/<Suspense /.test(appSrc2))
+    throw new Error('no <Suspense> boundary');
+});
+await test('Settings has a skeleton fallback so the view does not flash empty', () => {
+  if (!/function SettingsSkeleton/.test(appSrc2))
+    throw new Error('SettingsSkeleton component missing');
+  if (!/animate-pulse/.test(appSrc2))
+    throw new Error('skeleton not animated');
+});
+
+// =====================================================================
 header('4. Settings inline-result coverage');
 await test('SettingsPanel: InlineCheckResult handles every status', () => {
   const src = fs.readFileSync(path.join(PROJ, 'src', 'components', 'SettingsPanel.jsx'), 'utf8');

@@ -240,17 +240,45 @@ function createTray() {
 function setupSingleInstance() {
   const gotLock = app.requestSingleInstanceLock();
   if (!gotLock) {
+    // Second-instance arm: the OS will deliver our argv to the running
+    // instance via the 'second-instance' event below. We just exit silently —
+    // the running instance handles user feedback (notification + focus).
     app.quit();
     return false;
   }
   app.on('second-instance', (_event, argv) => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-      const fileArgs = argv.filter((a) => /\.(pdf|docx|pptx)$/i.test(a) && fs.existsSync(a));
-      if (fileArgs.length) {
-        mainWindow.webContents.send('files:imported', fileArgs);
-      }
+    if (!mainWindow) return;
+    // Bring the existing window forward — Chromium's process_singleton IPC
+    // dislikes synchronous calls to native APIs (Notification, flashFrame)
+    // inside this handler on some Windows builds (process_singleton_win.cc
+    // "Invalid format for start command" warning followed by an exit code
+    // 0xFFFE0003). Schedule all native work to the next tick so it runs
+    // outside Chromium's argv parsing call stack.
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
+    setImmediate(() => {
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(true);
+        setTimeout(() => {
+          try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(false); } catch {}
+        }, 3000);
+      } catch {}
+      try {
+        if (Notification.isSupported()) {
+          new Notification({
+            title: 'Veloxa Watermark Studio',
+            body: 'Application is already running.',
+            silent: true,
+          }).show();
+        }
+      } catch {}
+    });
+    // File association / "Open With" forwarding stays synchronous — it's
+    // pure JS that the renderer subscribes to.
+    const fileArgs = argv.filter((a) => /\.(pdf|docx|pptx)$/i.test(a) && fs.existsSync(a));
+    if (fileArgs.length) {
+      mainWindow.webContents.send('files:imported', fileArgs);
     }
   });
   return true;
@@ -276,17 +304,22 @@ if (!setupSingleInstance()) {
       logFatal('queue-restore', err);
     }
 
-    // Probe LibreOffice presence in the background so the Convert-to-PDF
-    // feature has a cached availability state when the user opens the
-    // profile editor or runs validation.
-    try {
-      const converter = require('../engine/converter');
-      const logger = require('../engine/logger');
-      converter.status().then((s) => {
-        if (s.available) logger.info(`PDF converter detected: LibreOffice ${s.version || ''} at ${s.path}`);
-        else logger.info('PDF converter: not installed (Convert-to-PDF will be disabled until LibreOffice is added)');
-      }).catch(() => {});
-    } catch {}
+    // Probe Office / LibreOffice presence in the BACKGROUND, deferred until
+    // after the main window has had a chance to paint. The probe spawns
+    // PowerShell + soffice processes which take 1-3 s on cold boot —
+    // running it inline blocks the renderer paint and makes the app feel
+    // sluggish on low-end machines. The check is cached, so a one-time
+    // delay here doesn't affect any later validation calls.
+    setTimeout(() => {
+      try {
+        const converter = require('../engine/converter');
+        const logger = require('../engine/logger');
+        converter.status().then((s) => {
+          if (s.available) logger.info(`PDF converter detected: ${(s.backends || []).join(' + ') || 'available'}`);
+          else logger.info('PDF converter: not installed (Convert-to-PDF will be disabled until Office or LibreOffice is added)');
+        }).catch(() => {});
+      } catch {}
+    }, 2500);
 
     createMainWindow();
     createTray();

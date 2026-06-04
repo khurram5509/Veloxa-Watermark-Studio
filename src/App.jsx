@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Play, Files, CheckCircle2, XCircle, Activity, Layers, Sparkles,
@@ -9,15 +9,20 @@ import Sidebar from './components/Sidebar';
 import DropZone from './components/DropZone';
 import QueuePanel from './components/QueuePanel';
 import ProfilesPanel from './components/ProfilesPanel';
-import ProfileEditor from './components/ProfileEditor';
 import LogsPanel from './components/LogsPanel';
-import SettingsPanel from './components/SettingsPanel';
 import StatCard from './components/StatCard';
-import HelpModal from './components/HelpModal';
-import FolderImportModal from './components/FolderImportModal';
 import UpdateBanner from './components/UpdateBanner';
 import { useStore } from './store/useStore';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
+
+// Lazy-loaded — only fetched + parsed when the user actually opens them. Saves
+// ~80 KB on first paint (ProfileEditor pulls LogoLibrary, color pickers, the
+// preview canvas; HelpModal is text-heavy; SettingsPanel pulls scroll-spy +
+// IntersectionObserver init; FolderImportModal is rarely opened on first launch).
+const ProfileEditor     = lazy(() => import('./components/ProfileEditor'));
+const HelpModal         = lazy(() => import('./components/HelpModal'));
+const FolderImportModal = lazy(() => import('./components/FolderImportModal'));
+const SettingsPanel     = lazy(() => import('./components/SettingsPanel'));
 
 function useEngineWiring() {
   const { setQueue, appendLog, loadProfiles, loadSettings, loadLogs, setRestoreBanner, checkForUpdates } = useStore();
@@ -136,9 +141,15 @@ export default function App() {
           {view === 'settings' && <SettingsView/>}
         </main>
       </div>
-      <ProfileEditor/>
-      <HelpModal open={helpOpen} onClose={closeHelp}/>
-      <FolderImportModal/>
+      {/* Modals fall back to null while their chunks stream in — they're
+          hidden anyway until the user opens them, so the user never sees a
+          loading state. The store gates visibility for ProfileEditor /
+          FolderImportModal; HelpModal's `open` prop does the same. */}
+      <Suspense fallback={null}>
+        <ProfileEditor/>
+        <HelpModal open={helpOpen} onClose={closeHelp}/>
+        <FolderImportModal/>
+      </Suspense>
     </div>
   );
 }
@@ -417,9 +428,29 @@ function LogsView() {
 function SettingsView() {
   // overflow-hidden on the outer wrapper so the SettingsPanel's main column
   // owns the scrollbar — that's what the sticky left-rail nav anchors to.
+  // SettingsPanel is lazy-loaded; Suspense fallback shows a lightweight
+  // skeleton so the empty container doesn't flash.
   return (
     <div className="h-full p-3 sm:p-4 lg:p-5 overflow-hidden">
-      <SettingsPanel/>
+      <Suspense fallback={<SettingsSkeleton/>}>
+        <SettingsPanel/>
+      </Suspense>
+    </div>
+  );
+}
+
+function SettingsSkeleton() {
+  return (
+    <div className="h-full flex gap-3 lg:gap-5">
+      <div className="w-12 lg:w-52 shrink-0 surface-1 rounded-2xl p-1.5 lg:p-3 animate-pulse">
+        <div className="h-3 bg-ink-700/50 rounded mb-2 hidden lg:block"/>
+        {[...Array(8)].map((_, i) => <div key={i} className="h-6 bg-ink-700/40 rounded mb-1"/>)}
+      </div>
+      <div className="flex-1 surface-1 rounded-2xl p-4 lg:p-6 animate-pulse">
+        <div className="h-4 w-32 bg-ink-700/50 rounded mb-2"/>
+        <div className="h-3 w-64 bg-ink-700/30 rounded mb-6"/>
+        {[...Array(5)].map((_, i) => <div key={i} className="h-8 bg-ink-700/40 rounded mb-2"/>)}
+      </div>
     </div>
   );
 }
