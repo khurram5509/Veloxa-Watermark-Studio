@@ -40,7 +40,18 @@ html, body {
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.12); }
 
 /* ----------------------------- Light mode ----------------------------- */
+/* Switch the page color-scheme so native controls (number-spinner arrows,
+   date pickers, autofill) inherit light styling instead of the dark default
+   set at :root. Without this, e.g. spin-buttons on number inputs render with
+   dark-mode chrome on a white panel — looks broken at every DPI. */
+html.light { color-scheme: light; }
 html.light body { @apply bg-slate-50 text-slate-900; }
+
+/* Scrollbars — the white-on-dark shimmer (rgba(255,255,255,0.06)) is
+   invisible against light surfaces. Flip to a slate alpha so the
+   scrollbar's thumb is actually findable. */
+html.light ::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, 0.10); }
+html.light ::-webkit-scrollbar-thumb:hover { background: rgba(15, 23, 42, 0.20); }
 
 /* Surfaces */
 html.light .surface-1 { @apply bg-white border-slate-200; }
@@ -53,9 +64,35 @@ html.light .text-ink-200,
 html.light .text-ink-200\/70,
 html.light .text-ink-200\/60,
 html.light .text-ink-200\/50,
-html.light .text-ink-200\/40,
 html.light .text-ink-200\/80 { @apply text-slate-700; }
-html.light .text-white { @apply text-slate-900; }
+/* Disabled-state text needs more contrast than slate-700/40 to be readable */
+html.light .text-ink-200\/40 { @apply text-slate-400; }
+/* DON'T blanket-override .text-white in light mode — it's used on
+   `gradient-veloxa text-white` primary buttons where white-on-blue is the
+   correct contrast pair. The earlier override turned blue buttons into
+   slate-900-on-blue (illegible). Components that need dark labels on
+   light surfaces should use `text-ink-100` / `text-slate-900` directly. */
+
+/* Selected-state chips: `bg-veloxa-600/{10..20} text-white` works in dark
+   mode because the chip sits on a dark surface and the blue tint reads
+   deep. In light mode the tinted bg becomes pale (10–20% blue on white),
+   so the white label disappears. Compound-class selectors flip those
+   specific combinations to a deep veloxa text. */
+html.light .bg-veloxa-600\/10.text-white,
+html.light .bg-veloxa-600\/15.text-white,
+html.light .bg-veloxa-600\/20.text-white { color: theme('colors.veloxa.800'); }
+
+/* HelpModal headings use `text-white` directly. White on the white modal
+   surface = invisible. Force dark in light mode. */
+html.light h3.text-white { @apply text-slate-900; }
+
+/* Selected nav rows (Sidebar + HelpModal tabs) use a child motion-span
+   for the bg highlight, so the white text on the parent button doesn't
+   get caught by the compound `.bg-veloxa-600/15.text-white` rule above.
+   Tag those buttons with `sidebar-active-text` so we can flip the text
+   to a readable deep veloxa in light mode while keeping white-on-dark
+   in dark mode. */
+html.light .sidebar-active-text { color: theme('colors.veloxa.800'); }
 
 /* Backgrounds (most variants used in the app) */
 html.light .bg-ink-900,
@@ -77,11 +114,74 @@ html.light .border-ink-600\/50,
 html.light .border-ink-600\/60 { @apply border-slate-200; }
 html.light .border-ink-500,
 html.light .border-ink-500\/30,
+html.light .border-ink-500\/40,
 html.light .border-ink-500\/50,
 html.light .border-ink-500\/60 { @apply border-slate-300; }
 
 /* Hover affordances — flip the white-on-dark shimmer to grey-on-light */
 html.light .hover\:bg-white\/5:hover { background-color: rgba(15, 23, 42, 0.05); }
+
+/* btn-outline's hover state sets text to WHITE, which becomes invisible on
+   the light hover background. Restore dark text on hover. */
+html.light .btn-outline:hover { color: theme('colors.slate.900'); }
+
+/* Brand-color text — veloxa-400 is the light-on-dark variant. On white
+   it lacks the AA contrast we want for body text + small chips. Step down
+   to the 600 (primary) and 700 (high-contrast) variants. */
+html.light .text-veloxa-400 { @apply text-veloxa-700; }
+html.light .text-veloxa-300 { @apply text-veloxa-700; }
+
+/* Status colors — same issue. The 400 shades are tuned for the dark surface
+   palette. On white they look pastel/illegible. Step down. */
+html.light .text-emerald-400 { @apply text-emerald-700; }
+html.light .text-emerald-300 { @apply text-emerald-700; }
+html.light .text-amber-400 { @apply text-amber-700; }
+html.light .text-amber-300 { @apply text-amber-700; }
+html.light .text-rose-400 { @apply text-rose-700; }
+html.light .text-rose-300 { @apply text-rose-700; }
+html.light .text-red-400 { @apply text-red-700; }
+html.light .text-green-400 { @apply text-green-700; }
+
+/* Tinted backgrounds — the 10–20% alpha overlays barely show on white.
+   Bump opacity so chip / badge / status-row backgrounds are visible. */
+html.light .bg-veloxa-600\/10 { background-color: rgb(31 61 245 / 0.10); }
+html.light .bg-veloxa-600\/15 { background-color: rgb(31 61 245 / 0.12); }
+html.light .bg-veloxa-600\/20 { background-color: rgb(31 61 245 / 0.18); }
+html.light .bg-emerald-600\/10 { background-color: rgb(5 150 105 / 0.12); }
+html.light .bg-emerald-600\/15 { background-color: rgb(5 150 105 / 0.15); }
+html.light .bg-rose-600\/10 { background-color: rgb(225 29 72 / 0.12); }
+html.light .bg-rose-600\/15 { background-color: rgb(225 29 72 / 0.15); }
+html.light .bg-amber-600\/10 { background-color: rgb(217 119 6 / 0.14); }
+html.light .bg-amber-600\/15 { background-color: rgb(217 119 6 / 0.18); }
+html.light .bg-red-600\/15 { background-color: rgb(220 38 38 / 0.12); }
+html.light .bg-green-600\/15 { background-color: rgb(22 163 74 / 0.12); }
+
+/* Tinted borders — the 20–30% alpha versions disappear into white. Use
+   solid 300-weight color so the ring is actually visible. */
+html.light .border-veloxa-500\/20,
+html.light .border-veloxa-500\/30,
+html.light .border-veloxa-500\/40 { @apply border-veloxa-300; }
+html.light .border-emerald-500\/20,
+html.light .border-emerald-500\/30 { @apply border-emerald-300; }
+html.light .border-rose-500\/20,
+html.light .border-rose-500\/30 { @apply border-rose-300; }
+html.light .border-amber-500\/20,
+html.light .border-amber-500\/30 { @apply border-amber-300; }
+html.light .border-red-500\/30 { @apply border-red-300; }
+html.light .border-green-500\/30 { @apply border-green-300; }
+
+/* ring-1 ring-veloxa-500/30 etc. (used to outline the update banner) —
+   ditto: bump the alpha so the ring is actually visible on white. */
+html.light .ring-veloxa-500\/30 { --tw-ring-color: rgb(58 96 255 / 0.45); }
+html.light .ring-green-500\/30 { --tw-ring-color: rgb(34 197 94 / 0.40); }
+html.light .ring-red-500\/30 { --tw-ring-color: rgb(239 68 68 / 0.40); }
+html.light .ring-emerald-500\/30 { --tw-ring-color: rgb(16 185 129 / 0.40); }
+
+/* shadow-glow is the bright blue lift designed for buttons on a dark
+   surface. On white it just adds chromatic noise. Tone it down to a
+   subtle blue drop-shadow that still reads as "this is a primary
+   action" without overpowering the surface. */
+html.light .shadow-glow { box-shadow: 0 6px 20px -10px rgba(31, 61, 245, 0.35); }
 
 /* Inputs/selects: explicit light styling so placeholder etc. is readable */
 html.light .input,
@@ -92,11 +192,23 @@ html.light .textarea {
 html.light .input::placeholder,
 html.light .textarea::placeholder { color: rgb(148 163 184); }
 
+/* Native select dropdown arrow uses currentColor; with our overrides it
+   stays readable, but the focus ring needs the same alpha treatment. */
+html.light .focus\:ring-veloxa-500\/30:focus { --tw-ring-color: rgb(58 96 255 / 0.45); }
+
 /* Code chips inside Help modal */
 html.light code.font-mono { @apply bg-slate-100 border-slate-200 text-veloxa-700; }
 
+/* The log entries inside LogsPanel use level-tinted text. We already
+   re-tinted text-emerald/amber/rose-400 above. Also ensure the row
+   container reads on white: surface-1's white bg + slate text is fine. */
+
 /* TitleBar buttons stay legible */
 html.light .app-drag { color: theme('colors.slate.900'); }
+
+/* Dashed drop-zone border in light mode — slate-300 reads as "interactive"
+   rather than the dark border-ink-500/40 which becomes near-invisible */
+html.light .border-dashed { border-color: rgb(203 213 225); }
 
 @layer components {
   .surface-1 { @apply bg-ink-800/80 border border-ink-600/60 backdrop-blur-md; }

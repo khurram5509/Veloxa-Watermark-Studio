@@ -144,7 +144,7 @@ export default function ProfilesPanel({ compact = false }) {
           {query && (
             <button
               onClick={() => setQuery('')}
-              className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-white"
+              className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-ink-100"
               title="Clear"
             >
               <X className="w-3.5 h-3.5"/>

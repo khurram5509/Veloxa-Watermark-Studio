@@ -42,7 +42,11 @@ export default function Sidebar() {
               onClick={() => setView(item.id)}
               title={item.label}
               className={`relative w-full flex items-center justify-center xl:justify-start gap-3 px-2 xl:px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                active ? 'text-white' : 'text-ink-100 hover:bg-white/5'
+                // text-white reads on the dark surface; text-veloxa-800 in
+                // light mode (via html.light override) keeps the active row
+                // legible against the pale tinted background. text-ink-100
+                // base picks up the slate-700 mapping in light mode.
+                active ? 'text-white sidebar-active-text' : 'text-ink-100 hover:bg-white/5'
               }`}
             >
               {active && (

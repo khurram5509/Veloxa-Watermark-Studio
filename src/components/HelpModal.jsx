@@ -65,7 +65,7 @@ export default function HelpModal({ open, onClose }) {
                     key={t.id}
                     onClick={() => setTab(t.id)}
                     className={`relative flex items-center gap-2 px-4 py-2.5 text-xs font-medium transition-colors ${
-                      active ? 'text-white' : 'text-ink-100 hover:bg-white/5'
+                      active ? 'text-white sidebar-active-text' : 'text-ink-100 hover:bg-white/5'
                     }`}
                   >
                     <Icon className="w-3.5 h-3.5"/>
