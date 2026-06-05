@@ -90,6 +90,73 @@ await test('non-array assets returns null', () => {
   if (updater.pickAsset(null, 'X', '1') !== null) throw new Error();
 });
 
+// ---- Platform-aware picker (v2.7.3) ------------------------------------
+// The release ships Windows .exe + Mac arm64 .zip + Mac x64 .zip together.
+// A Mac user must NEVER be offered the .exe (their click would do nothing),
+// and a Windows user must never be offered a .zip. Arch-mismatch on Mac
+// (M1 grabs x64) is just as bad — wrong dyld → runtime crash on first run.
+const v272Assets = [
+  { name: 'VeloxaWatermarkStudio-Setup-2.7.2.exe',         browser_download_url: 'win.exe',   size: 85_790_000 },
+  { name: 'VeloxaWatermarkStudio-2.7.2-mac-arm64.zip',     browser_download_url: 'arm64.zip', size: 107_120_000 },
+  { name: 'VeloxaWatermarkStudio-2.7.2-mac-x64.zip',       browser_download_url: 'x64.zip',   size: 110_750_000 },
+  { name: 'VeloxaWatermarkStudio-mac-2.7.2.tar.gz',        browser_download_url: 'kit.tgz',   size: 5_950_000  },
+];
+const PATTERNS = {
+  'win32-x64':    'VeloxaWatermarkStudio-Setup-{version}.exe',
+  'darwin-arm64': 'VeloxaWatermarkStudio-{version}-mac-arm64.zip',
+  'darwin-x64':   'VeloxaWatermarkStudio-{version}-mac-x64.zip',
+};
+
+await test('Win user → .exe (never the .zip)', () => {
+  const a = updater.pickAsset(v272Assets, { patterns: PATTERNS, platform: 'win32', arch: 'x64' }, 'v2.7.2');
+  if (!a || a.name !== 'VeloxaWatermarkStudio-Setup-2.7.2.exe') throw new Error('got: ' + (a && a.name));
+});
+await test('Mac arm64 → arm64 .zip (never the x64 zip or the exe)', () => {
+  const a = updater.pickAsset(v272Assets, { patterns: PATTERNS, platform: 'darwin', arch: 'arm64' }, 'v2.7.2');
+  if (!a || a.name !== 'VeloxaWatermarkStudio-2.7.2-mac-arm64.zip') throw new Error('got: ' + (a && a.name));
+});
+await test('Mac x64 → x64 .zip (never the arm64 zip or the exe)', () => {
+  const a = updater.pickAsset(v272Assets, { patterns: PATTERNS, platform: 'darwin', arch: 'x64' }, 'v2.7.2');
+  if (!a || a.name !== 'VeloxaWatermarkStudio-2.7.2-mac-x64.zip') throw new Error('got: ' + (a && a.name));
+});
+await test('Mac arm64 with same-platform regex fallback (assets renamed)', () => {
+  const drifted = [
+    { name: 'README.txt' },
+    { name: 'VeloxaWatermarkStudio-mac-arm64-build123.zip' }, // version moved into the build id
+    { name: 'VeloxaWatermarkStudio-mac-x64-build123.zip'   },
+  ];
+  const a = updater.pickAsset(drifted, { patterns: PATTERNS, platform: 'darwin', arch: 'arm64' }, 'v2.7.2');
+  if (!a || a.name !== 'VeloxaWatermarkStudio-mac-arm64-build123.zip') throw new Error('got: ' + (a && a.name));
+});
+await test('Mac arm64 NEVER picks the x64 .zip on fallback', () => {
+  const onlyX64 = v272Assets.filter(a => !/arm64/i.test(a.name));
+  const a = updater.pickAsset(onlyX64, { patterns: PATTERNS, platform: 'darwin', arch: 'arm64' }, 'v2.7.2');
+  if (a) throw new Error('expected null (no arm64 asset available), got: ' + a.name);
+});
+await test('Mac x64 NEVER picks the arm64 .zip on fallback', () => {
+  const onlyArm = v272Assets.filter(a => !/x64/i.test(a.name));
+  const a = updater.pickAsset(onlyArm, { patterns: PATTERNS, platform: 'darwin', arch: 'x64' }, 'v2.7.2');
+  if (a) throw new Error('expected null (no x64 asset available), got: ' + a.name);
+});
+await test('Win NEVER picks a .zip on fallback even if no .exe present', () => {
+  const noExe = v272Assets.filter(a => !/\.exe$/i.test(a.name));
+  const a = updater.pickAsset(noExe, { patterns: PATTERNS, platform: 'win32', arch: 'x64' }, 'v2.7.2');
+  if (a) throw new Error('expected null (no .exe available), got: ' + a.name);
+});
+await test('Mac NEVER picks a .exe on fallback even if no .zip present', () => {
+  const noZips = v272Assets.filter(a => !/\.zip$/i.test(a.name));
+  const a = updater.pickAsset(noZips, { patterns: PATTERNS, platform: 'darwin', arch: 'arm64' }, 'v2.7.2');
+  if (a) throw new Error('expected null (no Mac asset available), got: ' + a.name);
+});
+await test('Unknown platform → null (no cross-platform leakage)', () => {
+  const a = updater.pickAsset(v272Assets, { patterns: PATTERNS, platform: 'linux', arch: 'x64' }, 'v2.7.2');
+  if (a !== null) throw new Error('linux should be null, got: ' + a.name);
+});
+await test('Legacy string pattern still works (back-compat)', () => {
+  const a = updater.pickAsset(v272Assets, 'VeloxaWatermarkStudio-Setup-{version}.exe', 'v2.7.2');
+  if (!a || a.name !== 'VeloxaWatermarkStudio-Setup-2.7.2.exe') throw new Error('got: ' + (a && a.name));
+});
+
 // =====================================================================
 header('3. downloadAsset (local mock server)');
 // Spin up a local HTTP server that streams a fake "installer" file.

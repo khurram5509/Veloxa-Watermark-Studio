@@ -162,17 +162,23 @@ function registerIpcHandlers({ getMainWindow }) {
   };
   const updateRepo = (pkg.veloxa && pkg.veloxa.updateRepo) || 'veloxa-app/watermark-studio';
   const assetPattern = (pkg.veloxa && pkg.veloxa.updateAssetPattern) || 'VeloxaWatermarkStudio-Setup-{version}.exe';
+  // Platform-aware patterns — when present, pickAsset selects by
+  // `${process.platform}-${process.arch}` so a Mac user never sees the
+  // Windows .exe and a Windows user never sees the Mac .zip.
+  const assetPatterns = (pkg.veloxa && pkg.veloxa.updateAssetPatterns) || null;
 
   ipcMain.handle('updater:check', async (_e, opts = {}) => {
     try {
       const result = await updater.check({
         currentVersion: app.getVersion(),
         repo: updateRepo,
+        // assetPatterns (map) wins; assetPattern (string) is the back-compat fallback.
+        assetPatterns,
         assetPattern,
         force: !!opts.force,
         settingsAdapter: updaterSettings,
       });
-      return { ok: true, ...result };
+      return { ok: true, platform: process.platform, arch: process.arch, ...result };
     } catch (err) {
       logger.warn(`Update check failed: ${err.message}`);
       return { ok: false, error: err.message, current: app.getVersion() };
@@ -183,7 +189,12 @@ function registerIpcHandlers({ getMainWindow }) {
     if (!url) return { ok: false, error: 'No download URL' };
     try {
       const downloadsDir = app.getPath('downloads') || app.getPath('temp');
-      const safeName = (name || 'VeloxaWatermarkStudio-Setup.exe').replace(/[\\/:*?"<>|]+/g, '_');
+      // Default filename mirrors the asset extension when name isn't supplied
+      // (only really happens in older renderer code paths). Win → .exe, Mac → .zip.
+      const platformDefaultName = process.platform === 'darwin'
+        ? `VeloxaWatermarkStudio-mac-${process.arch}.zip`
+        : 'VeloxaWatermarkStudio-Setup.exe';
+      const safeName = (name || platformDefaultName).replace(/[\\/:*?"<>|]+/g, '_');
       const dest = path.join(downloadsDir, safeName);
 
       // Stream the file with progress events to the renderer.
@@ -208,6 +219,52 @@ function registerIpcHandlers({ getMainWindow }) {
       return { ok: false, error: 'Installer file not found' };
     }
 
+    // ---- Platform / file-type mismatch guard ----
+    // Refuse to launch an asset that obviously doesn't match the host. A Mac
+    // user with a stale cached release from before the platform-aware updater
+    // landed could end up with VeloxaWatermarkStudio-Setup-X.X.X.exe queued
+    // — clicking Install would try to spawn a Windows PE binary via macOS
+    // launchd, which fails noisily. Better: clear error, redirect to GitHub.
+    const lower = installerPath.toLowerCase();
+    if (process.platform === 'darwin' && lower.endsWith('.exe')) {
+      logger.warn(`Refusing to launch Windows .exe on darwin: ${installerPath}`);
+      return { ok: false, error: 'This download is the Windows installer (.exe). Re-check for updates to fetch the macOS .zip.', wrongPlatform: true };
+    }
+    if (process.platform === 'win32' && (lower.endsWith('.zip') || lower.endsWith('.tar.gz') || lower.endsWith('.dmg'))) {
+      logger.warn(`Refusing to launch macOS archive on win32: ${installerPath}`);
+      return { ok: false, error: 'This download is the macOS bundle. Re-check for updates to fetch the Windows installer.', wrongPlatform: true };
+    }
+
+    // ---- macOS: hand the .zip to Archive Utility ----
+    // The Mac asset is a .zip containing Veloxa Watermark Studio.app. There
+    // is no auto-replace flow for unsigned drag-to-/Applications bundles, so
+    // the right UX is: open the .zip (Archive Utility unpacks the .app next
+    // to it), then highlight the resulting .app in Finder so the user can
+    // drag it onto /Applications. com.apple.quarantine on the .zip propagates
+    // to the extracted .app — we leave that alone; the user clears it via
+    // right-click → Open → Open on first launch (one-time Gatekeeper bypass).
+    if (process.platform === 'darwin' && /\.zip$/i.test(installerPath)) {
+      try {
+        const openErr = await shell.openPath(installerPath);
+        if (openErr) return { ok: false, error: openErr };
+        // Best-effort: highlight the (about-to-appear) .app once Archive Utility
+        // finishes — Finder shows the .zip until extraction completes, after
+        // which the .app appears alongside it.
+        const appCandidate = path.join(path.dirname(installerPath), 'Veloxa Watermark Studio.app');
+        setTimeout(() => {
+          try {
+            if (fs.existsSync(appCandidate)) shell.showItemInFolder(appCandidate);
+            else shell.showItemInFolder(installerPath);
+          } catch { /* non-fatal */ }
+        }, 1500);
+        return { ok: true, platform: 'darwin', kind: 'mac-zip', revealedAfterMs: 1500 };
+      } catch (err) {
+        logger.warn(`shell.openPath on mac zip failed: ${err.message}`);
+        return { ok: false, error: err.message };
+      }
+    }
+
+    // ---- Windows: SmartScreen MOTW strip + Inno /SILENT spawn ----
     // Windows attaches a "MOTW" (Mark-of-the-Web) zone-identifier stream to
     // files downloaded by HTTPS so SmartScreen knows to warn. The
     // (Save|Open)As… "Don't run" default has bitten users hard: they click
@@ -243,7 +300,7 @@ function registerIpcHandlers({ getMainWindow }) {
       // The installer will taskkill our exe partway through. Give it a
       // moment to actually attach before the renderer's main window is
       // torn down by the install.
-      return { ok: true, silent: !opts.veryVerbose };
+      return { ok: true, platform: 'win32', kind: 'win-exe', silent: !opts.veryVerbose };
     } catch (err) {
       logger.warn(`Silent installer spawn failed (${err.message}), falling back to shell.openPath`);
       const result = await shell.openPath(installerPath);

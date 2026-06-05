@@ -54,6 +54,40 @@ await test('check returns the full UI-required shape', () => {
 });
 
 // ---------------------------------------------------------------------
+header('1b. Platform-aware asset selection against the LIVE release');
+// Same release, asked from three different "virtual machines" — assert each
+// gets only its own asset and never the others.
+const PKG = require(`${PROJ}/package.json`);
+const assetPatterns = (PKG.veloxa && PKG.veloxa.updateAssetPatterns) || null;
+if (!assetPatterns) throw new Error('package.json missing veloxa.updateAssetPatterns');
+
+const platformProbes = [
+  { platform: 'win32',  arch: 'x64',   expect: /Setup-.+\.exe$/i,   reject: /\.zip$|\.tar\.gz$/i },
+  { platform: 'darwin', arch: 'arm64', expect: /mac-arm64\.zip$/i,  reject: /\.exe$|mac-x64\.zip$/i },
+  { platform: 'darwin', arch: 'x64',   expect: /mac-x64\.zip$/i,    reject: /\.exe$|mac-arm64\.zip$/i },
+];
+for (const probe of platformProbes) {
+  await test(`Live release: ${probe.platform}-${probe.arch} → matches ${probe.expect}`, async () => {
+    const r = await updater.check({
+      currentVersion: '2.5.0',
+      repo: 'khurram5509/Veloxa-Watermark-Studio',
+      assetPatterns,
+      platform: probe.platform,
+      arch: probe.arch,
+      force: true,
+    });
+    if (!r.asset) throw new Error('no asset returned');
+    if (!probe.expect.test(r.asset.name)) {
+      throw new Error(`got "${r.asset.name}" — does not match ${probe.expect}`);
+    }
+    if (probe.reject.test(r.asset.name)) {
+      throw new Error(`got "${r.asset.name}" — should NEVER pick a cross-platform asset (${probe.reject})`);
+    }
+    console.log(`        → ${r.asset.name} (${(r.asset.size/1024/1024).toFixed(1)} MB)`);
+  });
+}
+
+// ---------------------------------------------------------------------
 header('2. Download — full asset with progress + integrity verification');
 const destPath = path.join(tmp, liveCheck.asset.name);
 let progressEvents = 0;

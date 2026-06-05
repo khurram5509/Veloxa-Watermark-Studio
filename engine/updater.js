@@ -73,21 +73,65 @@ function compareVersions(a, b) {
 }
 
 /**
- * Pick the right Setup.exe out of a release's assets list.
+ * Pick the right installer asset out of a release's assets list.
  *
- * pattern can include "{version}" — we substitute the tag (sans leading 'v')
- * before matching. Returns the matched asset object (with .browser_download_url
- * and .size and .name) or null.
+ * Pattern matching is platform-aware so Windows users never get offered the
+ * macOS .zip and vice versa. Three calling conventions:
+ *
+ *   pickAsset(assets, pattern, tagName)
+ *       Legacy single-string form. The pattern is matched literally (with
+ *       `{version}` substituted) and the cross-platform safe fallback is
+ *       skipped — used by callers that already know which artifact they want.
+ *
+ *   pickAsset(assets, { patterns: {...}, platform, arch }, tagName)
+ *       Platform-aware form. `patterns` is keyed by `${platform}-${arch}`
+ *       (e.g. `win32-x64`, `darwin-arm64`, `darwin-x64`). Pulls the right
+ *       pattern for the calling machine, falls back to a same-platform regex
+ *       if the exact name doesn't match. Never falls across platforms — a
+ *       Mac user with a stale exe in the release will get `null`, not a .exe
+ *       they can't run.
  */
-function pickAsset(assets, pattern, tagName) {
+function pickAsset(assets, patternOrCfg, tagName) {
   if (!Array.isArray(assets) || assets.length === 0) return null;
   const version = String(tagName || '').replace(/^v/i, '');
+
+  // Resolve to { pattern, platform } for this call.
+  let pattern, platform;
+  if (typeof patternOrCfg === 'string') {
+    pattern = patternOrCfg;
+    platform = null;            // legacy: no platform-aware fallback
+  } else if (patternOrCfg && typeof patternOrCfg === 'object') {
+    platform = patternOrCfg.platform || process.platform;
+    const arch = patternOrCfg.arch || process.arch;
+    const patterns = patternOrCfg.patterns || {};
+    pattern = patterns[`${platform}-${arch}`]
+           || patterns[platform]
+           || null;
+    if (!pattern) return null;
+  } else {
+    return null;
+  }
+
   const expected = pattern.replace(/\{version\}/g, version).toLowerCase();
-  // Exact-name match first
   const exact = assets.find((a) => (a.name || '').toLowerCase() === expected);
   if (exact) return exact;
-  // Fall back: any .exe that looks like a Veloxa Setup
-  return assets.find((a) => /veloxa.*setup.*\.exe$/i.test(a.name || '')) || null;
+
+  // Same-platform regex fallback. We refuse to fall back across platforms —
+  // returning a Win .exe to a Mac (or vice versa) would break the install
+  // flow and confuse the user with a download they can't open.
+  if (platform === 'darwin') {
+    // The platform-aware caller supplies arch — only match the arch's zip,
+    // never the other arch's. Use `patternOrCfg.arch` directly so a stale
+    // global mock of process.arch doesn't slip through.
+    const archForRegex = (typeof patternOrCfg === 'object' && patternOrCfg.arch) || process.arch;
+    const archPat = archForRegex === 'arm64' ? 'arm64' : 'x64';
+    const re = new RegExp(`veloxa.*mac-${archPat}.*\\.zip$`, 'i');
+    return assets.find((a) => re.test(a.name || '')) || null;
+  }
+  if (platform === 'win32' || platform == null) {
+    return assets.find((a) => /veloxa.*setup.*\.exe$/i.test(a.name || '')) || null;
+  }
+  return null;
 }
 
 function fetchJson(urlStr, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
@@ -183,7 +227,15 @@ function _fetch(urlStr, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, expectJs
 async function check({
   currentVersion,
   repo,
+  // Legacy single-string pattern — kept for back-compat. If both are passed,
+  // assetPatterns wins.
   assetPattern = 'VeloxaWatermarkStudio-Setup-{version}.exe',
+  // Platform-aware map: { 'win32-x64': '...', 'darwin-arm64': '...', 'darwin-x64': '...' }
+  // When present, pickAsset selects by `${process.platform}-${process.arch}`.
+  assetPatterns = null,
+  // For tests: override the platform/arch the picker uses (defaults to process.*).
+  platform = process.platform,
+  arch = process.arch,
   force = false,
   settingsAdapter = null,
   timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -238,7 +290,11 @@ async function check({
     return { hasUpdate: false, current: currentVersion, latest: null, asset: null, releaseUrl: null, body: null, dismissed: false, cached: false, reason: 'no-tag' };
   }
 
-  const asset = pickAsset(release.assets || [], assetPattern, tagName);
+  // Use the platform-aware picker when patterns are provided; otherwise
+  // fall back to the legacy single-pattern lookup.
+  const asset = assetPatterns
+    ? pickAsset(release.assets || [], { patterns: assetPatterns, platform, arch }, tagName)
+    : pickAsset(release.assets || [], assetPattern, tagName);
   const releaseUrl = release.html_url || `https://github.com/${repo}/releases/tag/${tagName}`;
   const body = release.body || '';
   const cmp = compareVersions(currentVersion, latest);

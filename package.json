@@ -1,7 +1,7 @@
 {
   "name": "veloxa-watermark-studio",
   "productName": "Veloxa Watermark Studio",
-  "version": "2.7.2",
+  "version": "2.7.3",
   "description": "Automated Bulk Document Watermarking for PDF, DOCX, and PPTX",
   "author": {
     "name": "Veloxa",
@@ -9,7 +9,12 @@
   },
   "veloxa": {
     "updateRepo": "khurram5509/Veloxa-Watermark-Studio",
-    "updateAssetPattern": "VeloxaWatermarkStudio-Setup-{version}.exe"
+    "updateAssetPattern": "VeloxaWatermarkStudio-Setup-{version}.exe",
+    "updateAssetPatterns": {
+      "win32-x64": "VeloxaWatermarkStudio-Setup-{version}.exe",
+      "darwin-arm64": "VeloxaWatermarkStudio-{version}-mac-arm64.zip",
+      "darwin-x64": "VeloxaWatermarkStudio-{version}-mac-x64.zip"
+    }
   },
   "main": "electron/main.js",
   "scripts": {
