@@ -25,7 +25,8 @@
     "server": "node server/index.js",
     "smoke": "node scripts/smoke-engine.js",
     "installer": "node scripts/build-installer.js",
-    "dist:mac": "node scripts/build-mac.js"
+    "dist:mac": "node scripts/build-mac.js",
+    "dist:mac:app": "node scripts/build-mac-app.js"
   },
   "dependencies": {
     "pdf-lib": "^1.17.1",

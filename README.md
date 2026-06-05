@@ -10,16 +10,18 @@ A premium, offline desktop tool for unattended bulk watermarking of PDF, DOCX, a
 
 **Windows 10/11 (x64)** — **[VeloxaWatermarkStudio-Setup-2.7.2.exe](https://github.com/khurram5509/Veloxa-Watermark-Studio/releases/latest)** (81.8 MB) — per-user installer, no admin needed. Auto-update once per day (silently); manual check in **Settings → Updates**.
 
-**macOS (Apple Silicon + Intel)** — **[VeloxaWatermarkStudio-mac-2.7.2.tar.gz](https://github.com/khurram5509/Veloxa-Watermark-Studio/releases/latest)** (5.7 MB) — universal assembler kit. After download:
+**macOS — one-click installable, no Terminal needed:**
 
-```bash
-tar -xzf VeloxaWatermarkStudio-mac-2.7.2.tar.gz
-cd VeloxaWatermarkStudio-mac-2.7.2
-bash veloxa-mac-installer.sh
-open "Veloxa Watermark Studio.app"
-```
+| Mac | Download | Size |
+|---|---|---:|
+| Apple Silicon (M1 / M2 / M3 / M4) | **[VeloxaWatermarkStudio-2.7.2-mac-arm64.zip](https://github.com/khurram5509/Veloxa-Watermark-Studio/releases/latest)** | 102 MB |
+| Intel Macs | **[VeloxaWatermarkStudio-2.7.2-mac-x64.zip](https://github.com/khurram5509/Veloxa-Watermark-Studio/releases/latest)** | 106 MB |
 
-The installer auto-detects your CPU, downloads the matching Electron 33.4.11 runtime (~100 MB, cached for next time), and stitches together a launchable **Veloxa Watermark Studio.app**. Drag it to **/Applications**. For **Convert-to-PDF on macOS** install [LibreOffice](https://www.libreoffice.org/download/download/) — Veloxa auto-detects `soffice`. (Microsoft Office's COM API is Windows-only.) The kit is unsigned: macOS may say "from an unidentified developer" — **right-click the app → Open → Open**, one-time only.
+Download → double-click to extract → drag **Veloxa Watermark Studio.app** to **/Applications** → first launch: right-click → **Open** → **Open** (one-time Gatekeeper bypass; the build is unsigned). That's it.
+
+For **Convert-to-PDF on macOS** install [LibreOffice](https://www.libreoffice.org/download/download/) — Veloxa auto-detects `soffice`. (Microsoft Office's COM API is Windows-only and unavailable on Mac.)
+
+> Scripted / fleet install? There's also a **[5.7 MB assembler kit](https://github.com/khurram5509/Veloxa-Watermark-Studio/releases/latest)** (`VeloxaWatermarkStudio-mac-2.7.2.tar.gz`) that downloads the Electron runtime on first run — see the release notes for the three-line bash flow.
 
 ---
 
