@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Play, Pause, RotateCcw, Square, Trash2, FolderOpen, FileText,
   Presentation, FileType2, CheckCircle2, XCircle, Loader2, Clock, FolderInput,
+  X, CircleX,
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { basename, ms } from '../utils/format';
@@ -59,8 +60,20 @@ export default function QueuePanel() {
           <button onClick={() => v?.engine.retryFailed()} className="btn-ghost text-xs" title="Retry failed">
             <RotateCcw className="w-3.5 h-3.5"/>
           </button>
+          {queue.counts.failed > 0 && (
+            <button
+              onClick={() => v?.engine.clearFailed()}
+              className="btn-ghost text-xs text-rose-400"
+              title={`Clear ${queue.counts.failed} failed`}
+            >
+              <CircleX className="w-3.5 h-3.5"/> Clear failed
+            </button>
+          )}
           <button onClick={() => v?.engine.clearCompleted()} className="btn-ghost text-xs" title="Clear completed">
-            <Trash2 className="w-3.5 h-3.5"/>
+            <Trash2 className="w-3.5 h-3.5"/> Clear done
+          </button>
+          <button onClick={() => v?.engine.clearAll()} className="btn-ghost text-xs" title="Clear everything (also cancels if running)">
+            Clear all
           </button>
           {queue.running && (
             <button onClick={() => v?.engine.cancel()} className="btn-ghost text-xs text-rose-400">
@@ -122,6 +135,19 @@ export default function QueuePanel() {
                         <FolderOpen className="w-3.5 h-3.5"/>
                       </button>
                     )}
+                    {/* Per-row remove. Disabled while running — must cancel
+                        first to avoid orphaning a live worker. Visible always
+                        (not hover-only) so failed rows are obviously
+                        dismissable — the previous behavior was the source of
+                        "I can't delete these failed items" complaints. */}
+                    <button
+                      onClick={() => v?.engine.removeJob(job.id)}
+                      disabled={job.status === 'running'}
+                      className="btn-ghost p-1.5 text-muted hover:text-rose-400 disabled:opacity-30 disabled:cursor-not-allowed"
+                      title={job.status === 'running' ? 'Cancel queue first to remove a running job' : 'Remove from queue'}
+                    >
+                      <X className="w-3.5 h-3.5"/>
+                    </button>
                   </motion.div>
                 );
               })}

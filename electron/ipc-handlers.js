@@ -106,6 +106,8 @@ function registerIpcHandlers({ getMainWindow }) {
   ipcMain.handle('engine:cancel', () => queue.cancel());
   ipcMain.handle('engine:retryFailed', () => queue.retryFailed());
   ipcMain.handle('engine:clearCompleted', () => queue.clearCompleted());
+  ipcMain.handle('engine:clearFailed', () => queue.clearFailed());
+  ipcMain.handle('engine:removeJob', (_e, jobId) => queue.removeJob(jobId));
   ipcMain.handle('engine:clearAll', () => queue.clearAll());
   ipcMain.handle('engine:status', () => queue.status());
 

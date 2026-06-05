@@ -10,6 +10,7 @@ const WorkerPool = require('./workerPool');
 const queueState = require('./queueState');
 const { hasVeloxaWatermark } = require('./conflict');
 const converter = require('./converter');
+const { unlinkWithRetry } = require('./util/fsRetry');
 
 const STATUS = Object.freeze({
   PENDING: 'pending',
@@ -88,10 +89,28 @@ function restoreFromDisk() {
     error: j.error,
     durationMs: j.durationMs,
     bytes: j.bytes,
+    orphans: Array.isArray(j.orphans) ? j.orphans : undefined,
   }));
   state.counter = data.counter ?? null;
   state.startedAt = data.startedAt || null;
   state.finishedAt = data.finishedAt || null;
+
+  // Sweep orphan intermediates from prior runs — files the unlink-with-retry
+  // couldn't get rid of last time because AV/Dropbox held the handle past 4 s.
+  // On a fresh launch those handles are released, so a single unlink works.
+  // Best-effort: silent miss if still locked.
+  let swept = 0;
+  for (const j of state.jobs) {
+    if (!Array.isArray(j.orphans) || j.orphans.length === 0) continue;
+    const survivors = [];
+    for (const p of j.orphans) {
+      try { fs.unlinkSync(p); swept++; }
+      catch { survivors.push(p); }
+    }
+    j.orphans = survivors.length ? survivors : undefined;
+  }
+  if (swept > 0) logger.info(`Swept ${swept} orphan intermediate file(s) from prior runs.`);
+
   emitUpdated();
   return {
     pending: counts().pending,
@@ -198,7 +217,30 @@ async function runOne(job) {
         preference: cfg.pdfConverter || 'auto',
         quality: job.profile.pdfQuality || 'standard',
       });
-      try { fs.unlinkSync(outputPath); } catch {}
+      // Delete the intermediate watermarked .docx/.pptx left behind by the
+      // PDF conversion step. unlinkWithRetry handles the post-COM file-handle
+      // race: Office's PowerShell host calls ReleaseComObject + GC.Collect +
+      // Quit but Windows can still hold the kernel handle for a few hundred
+      // ms afterwards. Without the retry we'd EPERM, swallow it, and leave
+      // an orphan file the user later finds and can't delete (because the
+      // handle is *still* technically held by an undead Office worker).
+      // 5-step backoff gives the OS up to ~3.85 s to release.
+      try {
+        await unlinkWithRetry(outputPath);
+        logger.debug(`Deleted intermediate ${path.basename(outputPath)} after PDF conversion`, { jobId: job.id });
+      } catch (unlinkErr) {
+        // Last-ditch fallback: queue the intermediate for deletion on next
+        // app launch so the user isn't permanently stuck with an orphan.
+        // Most cleanups happen via the retry above; this branch only fires
+        // when an antivirus / Dropbox / OneDrive holds the file past 4 s.
+        logger.warn(
+          `Could not delete intermediate ${path.basename(outputPath)} ` +
+          `(${unlinkErr.code || 'EUNKNOWN'}). It will be cleaned up next launch.`,
+          { jobId: job.id, intermediate: outputPath }
+        );
+        if (!job.orphans) job.orphans = [];
+        job.orphans.push(outputPath);
+      }
       finalOutput = safe;
       logger.info(`Converted to PDF (${conv.active}): ${path.basename(safe)}`, { jobId: job.id });
     }
@@ -327,6 +369,26 @@ function clearCompleted() {
   emitUpdated();
   return publicState();
 }
+// Drop every failed-status job from the list. Common after a Dropbox/AV hiccup:
+// the user fixed the underlying issue, retried, and wants the failed shadows gone.
+function clearFailed() {
+  state.jobs = state.jobs.filter((j) => j.status !== STATUS.FAILED);
+  emitUpdated();
+  return publicState();
+}
+// Per-row delete. Refuses to remove a running job — that would leave a worker
+// orphaned with no row to write its result back into. Cancel-then-remove is
+// the correct flow if you really want to nuke a running job.
+function removeJob(jobId) {
+  const idx = state.jobs.findIndex((j) => j.id === jobId);
+  if (idx === -1) return publicState();
+  if (state.jobs[idx].status === STATUS.RUNNING) {
+    return publicState();
+  }
+  state.jobs.splice(idx, 1);
+  emitUpdated();
+  return publicState();
+}
 function clearAll() {
   if (state.running) cancel();
   state.jobs = [];
@@ -356,6 +418,8 @@ module.exports = {
   cancel,
   retryFailed,
   clearCompleted,
+  clearFailed,
+  removeJob,
   clearAll,
   status,
   restoreFromDisk,

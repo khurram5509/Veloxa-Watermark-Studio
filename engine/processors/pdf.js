@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { PDFDocument, StandardFonts, degrees, rgb } = require('pdf-lib');
+const { readFileWithRetry, writeFileWithRetry } = require('../util/fsRetry');
 
 function hexToRgb(hex) {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '#000000');
@@ -89,7 +90,7 @@ function placement(position, w, h, tw, th, margin, offsetX = 0, offsetY = 0) {
 async function embedLogo(pdfDoc, logoPath) {
   if (!logoPath) return null;
   const ext = path.extname(logoPath).toLowerCase();
-  const bytes = await fs.readFile(logoPath);
+  const bytes = await readFileWithRetry(logoPath);
   if (ext === '.png') return pdfDoc.embedPng(bytes);
   if (ext === '.jpg' || ext === '.jpeg') return pdfDoc.embedJpg(bytes);
   // fallback: try PNG decoder; SVG not natively supported by pdf-lib
@@ -103,7 +104,7 @@ async function embedLogo(pdfDoc, logoPath) {
 const VELOXA_PDF_MARKER = 'VeloxaWatermark/1';
 
 async function processPdf({ inputPath, outputPath, profile, settings }) {
-  const inputBytes = await fs.readFile(inputPath);
+  const inputBytes = await readFileWithRetry(inputPath);
   const pdfDoc = await PDFDocument.load(inputBytes, { ignoreEncryption: true, updateMetadata: false });
 
   const font = await pdfDoc.embedFont(pickFont(profile));
@@ -179,7 +180,7 @@ async function processPdf({ inputPath, outputPath, profile, settings }) {
     // Encryption support can be added with qpdf or hummus-recipe in a follow-up.
   }
 
-  await fs.writeFile(outputPath, outBytes);
+  await writeFileWithRetry(outputPath, outBytes);
   return { outputPath, pages: pdfDoc.getPageCount() };
 }
 

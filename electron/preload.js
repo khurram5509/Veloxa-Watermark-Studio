@@ -75,6 +75,8 @@ contextBridge.exposeInMainWorld('veloxa', {
     cancel: () => invoke('engine:cancel'),
     retryFailed: () => invoke('engine:retryFailed'),
     clearCompleted: () => invoke('engine:clearCompleted'),
+    clearFailed: () => invoke('engine:clearFailed'),
+    removeJob: (jobId) => invoke('engine:removeJob', jobId),
     clearAll: () => invoke('engine:clearAll'),
     status: () => invoke('engine:status'),
     validateProfile: (profile) => invoke('engine:validateProfile', profile),

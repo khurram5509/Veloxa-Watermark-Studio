@@ -5,15 +5,18 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const PizZip = require('pizzip');
+const { readFileWithRetry, writeFileWithRetry } = require('../util/fsRetry');
 
 async function readZip(p) {
-  const buf = await fs.readFile(p);
+  // readFileWithRetry handles transient EPERM/EBUSY (Dropbox/OneDrive sync,
+  // Office COM hold-after-close) by backoff-retrying for up to ~3.85 s.
+  const buf = await readFileWithRetry(p);
   return new PizZip(buf);
 }
 
 async function writeZip(zip, dest) {
   const out = zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });
-  await fs.writeFile(dest, out);
+  await writeFileWithRetry(dest, out);
 }
 
 function escapeXml(s) {
@@ -33,7 +36,7 @@ function ensureFolder(zip, folder) {
 async function readImage(logoPath) {
   if (!logoPath) return null;
   const ext = path.extname(logoPath).toLowerCase().replace('.', '') || 'png';
-  const data = await fs.readFile(logoPath);
+  const data = await readFileWithRetry(logoPath);
   const dims = readImageSize(data);
   return { ext: ext === 'jpg' ? 'jpeg' : ext, data, width: dims?.width, height: dims?.height };
 }
