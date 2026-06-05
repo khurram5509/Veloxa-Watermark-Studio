@@ -13,11 +13,30 @@ const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
 
-const OUT_DIR = path.resolve(__dirname, '..', 'build');
+const OUT_DIR  = path.resolve(__dirname, '..', 'build');
 const ICO_PATH = path.join(OUT_DIR, 'icon.ico');
 const PNG_PATH = path.join(OUT_DIR, 'icon.png');
+const ICNS_PATH = path.join(OUT_DIR, 'icon.icns');
 
 const SIZES = [16, 32, 48, 64, 128, 256];
+// macOS .icns sizes — these are the OSType codes Finder + Dock look up.
+// Using PNG-encoded entries (introduced in macOS 10.7+) so we get crisp
+// transparency. The retina entries (ic11/ic12/ic13/ic14) are the same
+// pixel size as their non-retina counterparts but tagged differently so
+// the OS picks them on @2x displays.
+const ICNS_SIZES = [
+  { type: 'icp4', size: 16 },
+  { type: 'icp5', size: 32 },
+  { type: 'icp6', size: 64 },
+  { type: 'ic07', size: 128 },
+  { type: 'ic08', size: 256 },
+  { type: 'ic09', size: 512 },
+  { type: 'ic10', size: 1024 },
+  { type: 'ic11', size: 32 },
+  { type: 'ic12', size: 64 },
+  { type: 'ic13', size: 256 },
+  { type: 'ic14', size: 512 },
+];
 
 // Veloxa palette — pulled from src/index.css token names.
 const HEX_TOP_LEFT     = [0x1F, 0x3D, 0xF5]; // veloxa-600
@@ -206,6 +225,24 @@ function encodeIco(frames) {
   return Buffer.concat([header, ...dirEntries, ...frames.map(f => f.data)]);
 }
 
+// ---------- ICNS container (macOS) ------------------------------------------
+
+function encodeIcns(entries) {
+  // ICNS file layout: 'icns' magic + total length BE + sequence of entries.
+  // Each entry: 4-byte OSType + 4-byte length BE (incl 8-byte header) + data.
+  const blocks = entries.map(({ type, data }) => {
+    const header = Buffer.alloc(8);
+    header.write(type, 0, 4, 'ascii');
+    header.writeUInt32BE(8 + data.length, 4);
+    return Buffer.concat([header, data]);
+  });
+  const body = Buffer.concat(blocks);
+  const fileHeader = Buffer.alloc(8);
+  fileHeader.write('icns', 0, 4, 'ascii');
+  fileHeader.writeUInt32BE(8 + body.length, 4);
+  return Buffer.concat([fileHeader, body]);
+}
+
 // ---------- main ------------------------------------------------------------
 
 if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -225,3 +262,23 @@ console.log(`Wrote ${ICO_PATH} (${(fs.statSync(ICO_PATH).size / 1024).toFixed(1)
 const png256 = frames.find(f => f.size === 256).data;
 fs.writeFileSync(PNG_PATH, png256);
 console.log(`Wrote ${PNG_PATH} (${(fs.statSync(PNG_PATH).size / 1024).toFixed(1)} KB)`);
+
+// Generate the macOS .icns container. Reuses the same renderer; the larger
+// sizes (512, 1024) are needed for Dock + Cmd-I "Get Info" + retina rendering.
+console.log('Generating macOS .icns…');
+const icnsFrameCache = new Map(); // size → PNG bytes (avoid re-rendering 256 etc.)
+const getIcnsFrame = (size) => {
+  if (!icnsFrameCache.has(size)) {
+    const existing = frames.find((f) => f.size === size);
+    if (existing) icnsFrameCache.set(size, existing.data);
+    else icnsFrameCache.set(size, encodePng(renderIcon(size), size));
+  }
+  return icnsFrameCache.get(size);
+};
+const icnsEntries = ICNS_SIZES.map(({ type, size }) => {
+  const data = getIcnsFrame(size);
+  console.log(`  ${type} (${size}×${size}) → ${(data.length / 1024).toFixed(1)} KB`);
+  return { type, data };
+});
+fs.writeFileSync(ICNS_PATH, encodeIcns(icnsEntries));
+console.log(`Wrote ${ICNS_PATH} (${(fs.statSync(ICNS_PATH).size / 1024).toFixed(1)} KB)`);

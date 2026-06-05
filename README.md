@@ -1,16 +1,25 @@
 # Veloxa Watermark Studio
 
-**Automated bulk document watermarking for Windows 10 / 11.**
+**Automated bulk document watermarking for Windows 10 / 11 and macOS.**
 
 A premium, offline desktop tool for unattended bulk watermarking of PDF, DOCX, and PPTX files. Drag in files or entire folders, pick a profile, hit **PROCESS** — Veloxa scans, watermarks, and writes the outputs in parallel via real worker threads, without ever touching the originals.
 
-> **Current version: 2.7.2** — DOCX watermark fixes: now renders **on top** of the document (positive z-index, was rendering behind text), and now appears on **page 1 of cover-page documents** (was skipped when `<w:titlePg/>` Different-First-Page was set).
+> **Current version: 2.7.2** — DOCX watermark fixes (renders **on top** of the document, appears on **page 1 of cover-page documents**) **+ NEW: macOS build** (Apple Silicon + Intel).
 
 ## Download
 
-Latest installer: **[VeloxaWatermarkStudio-Setup-2.7.2.exe](https://github.com/khurram5509/Veloxa-Watermark-Studio/releases/latest)** (81.8 MB, Windows 10/11 x64, per-user install — no admin rights needed).
+**Windows 10/11 (x64)** — **[VeloxaWatermarkStudio-Setup-2.7.2.exe](https://github.com/khurram5509/Veloxa-Watermark-Studio/releases/latest)** (81.8 MB) — per-user installer, no admin needed. Auto-update once per day (silently); manual check in **Settings → Updates**.
 
-The app checks for new versions automatically once per day (silently — no "you're up to date" toast every launch). You can trigger a manual check or disable auto-checks from **Settings → Updates**.
+**macOS (Apple Silicon + Intel)** — **[VeloxaWatermarkStudio-mac-2.7.2.tar.gz](https://github.com/khurram5509/Veloxa-Watermark-Studio/releases/latest)** (5.7 MB) — universal assembler kit. After download:
+
+```bash
+tar -xzf VeloxaWatermarkStudio-mac-2.7.2.tar.gz
+cd VeloxaWatermarkStudio-mac-2.7.2
+bash veloxa-mac-installer.sh
+open "Veloxa Watermark Studio.app"
+```
+
+The installer auto-detects your CPU, downloads the matching Electron 33.4.11 runtime (~100 MB, cached for next time), and stitches together a launchable **Veloxa Watermark Studio.app**. Drag it to **/Applications**. For **Convert-to-PDF on macOS** install [LibreOffice](https://www.libreoffice.org/download/download/) — Veloxa auto-detects `soffice`. (Microsoft Office's COM API is Windows-only.) The kit is unsigned: macOS may say "from an unidentified developer" — **right-click the app → Open → Open**, one-time only.
 
 ---
 

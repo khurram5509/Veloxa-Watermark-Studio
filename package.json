@@ -24,7 +24,8 @@
     "dist:installer": "npm run build && electron-builder --win nsis",
     "server": "node server/index.js",
     "smoke": "node scripts/smoke-engine.js",
-    "installer": "node scripts/build-installer.js"
+    "installer": "node scripts/build-installer.js",
+    "dist:mac": "node scripts/build-mac.js"
   },
   "dependencies": {
     "pdf-lib": "^1.17.1",
