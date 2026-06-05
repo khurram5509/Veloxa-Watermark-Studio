@@ -158,6 +158,105 @@ await test('Legacy string pattern still works (back-compat)', () => {
 });
 
 // =====================================================================
+header('2b. v2.7.5 — Post-install reconcile + snooze (anti-nag)');
+
+await test('reconcilePostInstall clears stale cachedLatestRelease after install', () => {
+  const mem = makeMemSettings({
+    lastSeenAppVersion: '2.7.3',
+    cachedLatestRelease: { latest: '2.7.4', asset: { name: 'old.exe', url: 'x', size: 1 }, releaseUrl: 'r', body: 'b' },
+    lastUpdateCheckMs: Date.now() - 1000,
+  });
+  const r = updater.reconcilePostInstall('2.7.4', mem);
+  if (!r.changed) throw new Error('expected changed=true');
+  const after = mem.get();
+  if (after.cachedLatestRelease !== null) throw new Error('cache not cleared: ' + JSON.stringify(after.cachedLatestRelease));
+  if (after.lastUpdateCheckMs !== 0) throw new Error('debounce stamp not reset');
+  if (after.lastSeenAppVersion !== '2.7.4') throw new Error('lastSeen not advanced');
+});
+await test('reconcilePostInstall clears stale dismissedUpdateVersion (user moved past it)', () => {
+  const mem = makeMemSettings({
+    lastSeenAppVersion: '2.7.0',
+    dismissedUpdateVersion: '2.7.2', // user skipped 2.7.2, but is now on 2.7.4
+  });
+  updater.reconcilePostInstall('2.7.4', mem);
+  if (mem.get().dismissedUpdateVersion !== null) throw new Error('stale skip flag not cleared');
+});
+await test('reconcilePostInstall preserves dismiss for a future version', () => {
+  const mem = makeMemSettings({
+    lastSeenAppVersion: '2.7.3',
+    dismissedUpdateVersion: '2.8.0', // user skipped a future 2.8.0
+  });
+  updater.reconcilePostInstall('2.7.4', mem);
+  if (mem.get().dismissedUpdateVersion !== '2.8.0') throw new Error('future skip flag wrongly cleared');
+});
+await test('reconcilePostInstall is no-op when version unchanged (idempotent)', () => {
+  const mem = makeMemSettings({
+    lastSeenAppVersion: '2.7.4',
+    cachedLatestRelease: { latest: '2.7.5', asset: { name: 'real.exe', url: 'u', size: 1 } },
+    lastUpdateCheckMs: 12345,
+  });
+  const r = updater.reconcilePostInstall('2.7.4', mem);
+  if (r.changed) throw new Error('should be no-op');
+  if (mem.get().cachedLatestRelease === null) throw new Error('cache wrongly cleared');
+});
+await test('reconcilePostInstall on first run just stamps lastSeen', () => {
+  const mem = makeMemSettings({}); // empty
+  const r = updater.reconcilePostInstall('2.7.4', mem);
+  if (!r.changed) throw new Error('expected changed (first run)');
+  if (mem.get().lastSeenAppVersion !== '2.7.4') throw new Error('lastSeen not set');
+});
+await test('snoozeBanner persists version + expiry', () => {
+  const mem = makeMemSettings({});
+  const before = Date.now();
+  updater.snoozeBanner('2.7.5', mem);
+  const after = mem.get();
+  if (after.snoozeBannerVersion !== '2.7.5') throw new Error('version not stored');
+  if (!after.snoozeBannerUntilMs || after.snoozeBannerUntilMs < before + 23 * 60 * 60 * 1000) {
+    throw new Error('expiry ~24h not stored');
+  }
+});
+await test('check() returns hasUpdate:false + snoozed:true when banner is snoozed', async () => {
+  const mem = makeMemSettings({
+    lastUpdateCheckMs: Date.now() - 1000,
+    cachedLatestRelease: { latest: '2.8.0', asset: null, releaseUrl: '', body: '' },
+    snoozeBannerVersion: '2.8.0',
+    snoozeBannerUntilMs: Date.now() + 24 * 60 * 60 * 1000,
+  });
+  const r = await updater.check({
+    currentVersion: '2.7.4', repo: 'fake/fake', settingsAdapter: mem, force: false,
+  });
+  if (r.hasUpdate !== false) throw new Error('snoozed banner should suppress hasUpdate');
+  if (r.snoozed !== true) throw new Error('snoozed flag missing');
+});
+await test('check() does NOT snooze a different version', async () => {
+  const mem = makeMemSettings({
+    lastUpdateCheckMs: Date.now() - 1000,
+    cachedLatestRelease: { latest: '2.9.0', asset: null, releaseUrl: '', body: '' },
+    snoozeBannerVersion: '2.8.0', // snoozed the OLD version
+    snoozeBannerUntilMs: Date.now() + 24 * 60 * 60 * 1000,
+  });
+  const r = await updater.check({
+    currentVersion: '2.7.4', repo: 'fake/fake', settingsAdapter: mem, force: false,
+  });
+  if (r.hasUpdate !== true) throw new Error('different-version snooze must not block');
+  if (r.snoozed) throw new Error('snoozed flag should be false');
+});
+await test('check() self-heals stale cache (currentVersion >= cached.latest clears cache)', async () => {
+  const mem = makeMemSettings({
+    lastUpdateCheckMs: Date.now() - 1000,
+    cachedLatestRelease: { latest: '2.7.4', asset: null, releaseUrl: '', body: '' },
+  });
+  const r = await updater.check({
+    currentVersion: '2.7.4', repo: 'fake/fake', settingsAdapter: mem, force: false,
+  });
+  // After self-heal, the cached path is skipped and we fall to network.
+  // Network call fails with 404 (no real repo) → reason='no-releases' or net error.
+  // The KEY assertion is that the cache got cleared.
+  const after = mem.get();
+  if (after.cachedLatestRelease !== null) throw new Error('stale cache not self-healed');
+});
+
+// =====================================================================
 header('3. downloadAsset (local mock server)');
 // Spin up a local HTTP server that streams a fake "installer" file.
 const fakePayload = Buffer.alloc(200_000); // 200 KB

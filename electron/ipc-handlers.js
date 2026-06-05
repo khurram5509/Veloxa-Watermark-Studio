@@ -169,6 +169,28 @@ function registerIpcHandlers({ getMainWindow }) {
   // Windows .exe and a Windows user never sees the Mac .zip.
   const assetPatterns = (pkg.veloxa && pkg.veloxa.updateAssetPatterns) || null;
 
+  // ---- Post-install reconciliation (v2.7.5) ----
+  // Settings (cachedLatestRelease / dismissedUpdateVersion / snooze) persist
+  // across installs because they live in %APPDATA%, separate from the install
+  // dir. After a successful install, three things become stale:
+  //   • cachedLatestRelease.latest = the version we just installed → would
+  //     surface old asset URLs in the Settings panel "Latest known" tile
+  //   • dismissedUpdateVersion = older than current → blocking notifications
+  //     for a version the user has already moved past
+  //   • snoozeBannerVersion / snoozeBannerUntilMs = stale snooze for an older
+  //     prompt
+  // reconcilePostInstall detects a version change by comparing the running
+  // app.getVersion() to settings.lastSeenAppVersion (persisted by this call),
+  // and clears the stale fields. Idempotent — running on every launch is fine.
+  try {
+    const reconciled = updater.reconcilePostInstall(app.getVersion(), updaterSettings);
+    if (reconciled && reconciled.changed) {
+      logger.info(`Post-install reconcile: running ${app.getVersion()}, cleared stale updater state.`);
+    }
+  } catch (err) {
+    logger.warn(`reconcilePostInstall failed (non-fatal): ${err.message}`);
+  }
+
   ipcMain.handle('updater:check', async (_e, opts = {}) => {
     try {
       const result = await updater.check({
@@ -324,6 +346,15 @@ function registerIpcHandlers({ getMainWindow }) {
   ipcMain.handle('updater:dismissVersion', async (_e, version) => {
     if (!version) return { ok: false };
     settings.set({ dismissedUpdateVersion: String(version) });
+    return { ok: true };
+  });
+
+  // "Later" button — snooze the banner for this exact version for 24 h.
+  // Different from dismissVersion (permanent skip): a snooze re-surfaces the
+  // banner tomorrow so it's not forgotten, but stops nagging today.
+  ipcMain.handle('updater:snoozeBanner', async (_e, version) => {
+    if (!version) return { ok: false };
+    updater.snoozeBanner(String(version), updaterSettings);
     return { ok: true };
   });
 

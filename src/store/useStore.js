@@ -182,7 +182,18 @@ export const useStore = create((set, get) => ({
     if (info && info.latest) await v.updater.dismissVersion(info.latest);
     set({ updater: { status: 'idle', info: null, progress: null, installerPath: null, error: null } });
   },
-  hideUpdateBanner: () => set((s) => ({ updater: { ...s.updater, status: 'idle' } })),
+  // "Later" — hide the banner AND persist a 24h snooze for this exact
+  // version. Different from dismissUpdate (the "Skip" button, permanent).
+  // Without the persistent snooze, the next silent launch check would
+  // re-show the same banner for the same version every time — the "why does
+  // it keep asking me to install?" complaint.
+  hideUpdateBanner: async () => {
+    const info = (get && get().updater && get().updater.info) || null;
+    if (info && info.latest && v && v.updater && v.updater.snoozeBanner) {
+      try { await v.updater.snoozeBanner(info.latest); } catch { /* non-fatal */ }
+    }
+    set((s) => ({ updater: { ...s.updater, status: 'idle' } }));
+  },
 }));
 
 export function makeBlankProfile() {

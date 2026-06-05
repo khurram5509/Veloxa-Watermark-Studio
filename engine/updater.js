@@ -248,21 +248,57 @@ async function check({
   const dismissed = cfg.dismissedUpdateVersion || null;
   const lastCheck = cfg.lastUpdateCheckMs || 0;
   const cached = cfg.cachedLatestRelease || null;
+  const snoozeUntilMs = cfg.snoozeBannerUntilMs || 0;
+  const snoozedVersion = cfg.snoozeBannerVersion || null;
   const now = Date.now();
 
-  // Daily debounce: if we have a cached result and it's fresh, return it.
-  if (!force && settingsAdapter && cached && lastCheck && (now - lastCheck) < debounceMs) {
-    const has = compareVersions(currentVersion, cached.latest) < 0;
-    return {
+  // ---- Self-healing cache: clear when we've caught up ----
+  // If the cached `latest` is no longer ahead of currentVersion, the cache is
+  // stale — typically because the user just installed the version we had
+  // queued. Clearing here means:
+  //   1. Settings panel's "Latest known" tile no longer pins to the old value.
+  //   2. The next check goes to the network instead of returning a no-op cached
+  //      result that says "you're up to date" with a stale asset URL.
+  // Without this, the cache could pin to "v2.7.4 latest" forever after install,
+  // surfacing the OLD asset URL in any UI that reads cachedLatestRelease
+  // directly (Settings panel does).
+  if (settingsAdapter && cached && cached.latest &&
+      compareVersions(currentVersion, cached.latest) >= 0) {
+    settingsAdapter.set({
+      cachedLatestRelease: null,
+      lastUpdateCheckMs: 0,
+    });
+  }
+
+  // ---- Banner snooze: "Later" persists for 24h per version ----
+  // The X (Later) button on the banner used to just set in-memory status to
+  // 'idle' — next launch's silent check would re-show the banner for the
+  // exact same version, which feels like nagging. Now Later persists a
+  // `snoozeBannerUntilMs` + `snoozeBannerVersion` pair: if the same version
+  // is still the latest within the snooze window, we suppress.
+  function applySnooze(result) {
+    if (snoozeUntilMs && now < snoozeUntilMs && result.latest === snoozedVersion) {
+      return { ...result, hasUpdate: false, snoozed: true };
+    }
+    return { ...result, snoozed: false };
+  }
+
+  // Daily debounce: if we have a fresh cached result, return it (re-reading
+  // settings *after* the self-heal above so cached can be null now).
+  const cachedAfterHeal = settingsAdapter ? (settingsAdapter.get().cachedLatestRelease || null) : cached;
+  const lastCheckAfterHeal = settingsAdapter ? (settingsAdapter.get().lastUpdateCheckMs || 0) : lastCheck;
+  if (!force && settingsAdapter && cachedAfterHeal && lastCheckAfterHeal && (now - lastCheckAfterHeal) < debounceMs) {
+    const has = compareVersions(currentVersion, cachedAfterHeal.latest) < 0;
+    return applySnooze({
       hasUpdate: has,
       current: currentVersion,
-      latest: cached.latest,
-      asset: cached.asset,
-      releaseUrl: cached.releaseUrl,
-      body: cached.body,
-      dismissed: dismissed === cached.latest,
+      latest: cachedAfterHeal.latest,
+      asset: cachedAfterHeal.asset,
+      releaseUrl: cachedAfterHeal.releaseUrl,
+      body: cachedAfterHeal.body,
+      dismissed: dismissed === cachedAfterHeal.latest,
       cached: true,
-    };
+    });
   }
 
   const url = `https://api.github.com/repos/${repo}/releases/latest`;
@@ -313,7 +349,7 @@ async function check({
     });
   }
 
-  return {
+  return applySnooze({
     hasUpdate,
     current: currentVersion,
     latest,
@@ -322,7 +358,81 @@ async function check({
     body,
     dismissed: dismissed === latest,
     cached: false,
-  };
+  });
+}
+
+/**
+ * Reconcile stored state against the actual running version. Called once at
+ * app launch BEFORE any update check runs.
+ *
+ * The settings file persists across installs (it lives in %APPDATA%, not the
+ * install dir), which is mostly what you want — profiles, settings, queue
+ * survive. But three stale fields cause the "why am I being asked to install
+ * again?" pattern:
+ *
+ *   1. cachedLatestRelease.latest = the version we just installed → the cache
+ *      reports "you're up to date" with the OLD asset URL (so any UI reading
+ *      this directly, like Settings panel's "Latest known" tile, shows
+ *      misleading info).
+ *   2. dismissedUpdateVersion = older than currentVersion → the skip flag is
+ *      meaningless now; clearing it lets newly-published versions notify.
+ *   3. snoozeBannerVersion = older than currentVersion → snooze should clear.
+ *
+ * Detection signal: settings.lastSeenAppVersion (persisted here) differs from
+ * app.getVersion(). If yes, a version change happened since last launch (could
+ * be install OR downgrade). Reset the stale fields.
+ *
+ * Idempotent: running on every launch is fine. The clear-paths only fire when
+ * actual mismatches exist.
+ */
+function reconcilePostInstall(currentVersion, settingsAdapter) {
+  if (!settingsAdapter || !currentVersion) return { changed: false };
+  const cfg = settingsAdapter.get();
+  const lastSeen = cfg.lastSeenAppVersion || null;
+  const patch = {};
+  let changed = false;
+
+  // First-run / version-change detected.
+  if (lastSeen !== currentVersion) {
+    patch.lastSeenAppVersion = currentVersion;
+    changed = true;
+
+    // Clear cache if its `latest` no longer leads currentVersion.
+    if (cfg.cachedLatestRelease && cfg.cachedLatestRelease.latest &&
+        compareVersions(currentVersion, cfg.cachedLatestRelease.latest) >= 0) {
+      patch.cachedLatestRelease = null;
+      patch.lastUpdateCheckMs = 0;
+    }
+
+    // Clear stale skip flag.
+    if (cfg.dismissedUpdateVersion &&
+        compareVersions(currentVersion, cfg.dismissedUpdateVersion) >= 0) {
+      patch.dismissedUpdateVersion = null;
+    }
+
+    // Clear stale snooze.
+    if (cfg.snoozeBannerVersion &&
+        compareVersions(currentVersion, cfg.snoozeBannerVersion) >= 0) {
+      patch.snoozeBannerVersion = null;
+      patch.snoozeBannerUntilMs = 0;
+    }
+  }
+
+  if (changed) settingsAdapter.set(patch);
+  return { changed, patch };
+}
+
+/**
+ * "Later" button persistence. Suppresses the banner for the given version
+ * until `until` (defaults to 24h from now). Same version + same banner =
+ * no nag for a day, but newly-found versions still surface immediately.
+ */
+function snoozeBanner(latestVersion, settingsAdapter, durationMs = 24 * 60 * 60 * 1000) {
+  if (!settingsAdapter || !latestVersion) return;
+  settingsAdapter.set({
+    snoozeBannerVersion: latestVersion,
+    snoozeBannerUntilMs: Date.now() + durationMs,
+  });
 }
 
 /**
@@ -625,6 +735,8 @@ module.exports = {
   downloadAsset,
   compareVersions,
   pickAsset,
+  reconcilePostInstall,
+  snoozeBanner,
   // exposed for tests
   _fetch,
 };

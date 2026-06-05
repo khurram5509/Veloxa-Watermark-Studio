@@ -95,6 +95,7 @@ contextBridge.exposeInMainWorld('veloxa', {
     openInstaller: (p, opts) => invoke('updater:openInstaller', p, opts || {}),
     revealInstaller: (p) => invoke('updater:revealInstaller', p),
     dismissVersion: (v) => invoke('updater:dismissVersion', v),
+    snoozeBanner: (v) => invoke('updater:snoozeBanner', v),
     openReleaseUrl: (url) => invoke('updater:openReleaseUrl', url),
   },
 
