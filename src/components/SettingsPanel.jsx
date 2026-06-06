@@ -531,7 +531,7 @@ function ApplicationSection({ settings, set }) {
   const { theme, setTheme } = useStore();
   return (
     <>
-      <Row label="Theme" hint="Light theme has a small WIP">
+      <Row label="Theme">
         <div className="inline-flex rounded-lg border border-ink-500/40 overflow-hidden">
           <button
             onClick={() => setTheme('dark')}

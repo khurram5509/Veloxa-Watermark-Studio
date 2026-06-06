@@ -194,6 +194,51 @@ const settingsSrc = fs.readFileSync(path.join(PROJ, 'src', 'components', 'Settin
 const shortcutsSrc = fs.readFileSync(path.join(PROJ, 'src', 'hooks', 'useGlobalShortcuts.js'), 'utf8');
 const preloadSrc2 = fs.readFileSync(path.join(PROJ, 'electron', 'preload.js'), 'utf8');
 const ipcSrc2 = fs.readFileSync(path.join(PROJ, 'electron', 'ipc-handlers.js'), 'utf8');
+const titleBarSrc = fs.readFileSync(path.join(PROJ, 'src', 'components', 'TitleBar.jsx'), 'utf8');
+const helpModalSrc = fs.readFileSync(path.join(PROJ, 'src', 'components', 'HelpModal.jsx'), 'utf8');
+
+// ---- v2.8.2 — version display + live queue indicator -------------------
+// Strip JS line comments and block comments before scanning so explanatory
+// text mentioning the historical bug doesn't trip the assertion.
+function stripJsComments(src) {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+await test('TitleBar reads dynamic version (no hardcoded "v2.4.1" left)', () => {
+  // The bug: v2.4.1 had `<span>v2.4.1</span>` hardcoded in JSX. Every
+  // release since (v2.5-v2.8.0) bumped package.json but the title-bar
+  // string stayed "v2.4.1", so every install showed the wrong version
+  // in the chrome. Asserts the literal is gone from CODE (we strip the
+  // explanatory comment so it doesn't trip the regex) AND that the
+  // dynamic read is wired up.
+  const code = stripJsComments(titleBarSrc);
+  if (/v2\.4\.1/.test(code)) throw new Error('Hardcoded v2.4.1 literal still in TitleBar.jsx code');
+  if (!/versions\??\.app/.test(titleBarSrc)) {
+    throw new Error('TitleBar should read window.veloxa.versions.app dynamically');
+  }
+});
+await test('HelpModal version strings are dynamic (footer + License)', () => {
+  const code = stripJsComments(helpModalSrc);
+  if (/['"]v2\.4\.1['"]|>v2\.4\.1</.test(code)) throw new Error('Hardcoded v2.4.1 literal still in HelpModal.jsx code');
+});
+await test('TitleBar has a live queue status chip', () => {
+  // v2.8.2 adds a chip that shows queue counts across all views (was
+  // Dashboard-only). Asserts the QueueStatusChip component is referenced
+  // and that it pulls counts from queue.counts (the shape the store
+  // emits).
+  if (!/QueueStatusChip/.test(titleBarSrc)) throw new Error('QueueStatusChip component missing');
+  if (!/queue\.counts/.test(titleBarSrc)) throw new Error('QueueStatusChip should read queue.counts');
+  if (!/queue\.running/.test(titleBarSrc)) throw new Error('Chip should distinguish running state');
+});
+await test('Light theme stale "WIP" hint removed', () => {
+  // After the v2.7.6 light-mode polish (14 fixes), the Settings Theme
+  // row's hint "Light theme has a small WIP" is no longer accurate.
+  // Audit guard: regress if it sneaks back.
+  if (/Light theme has a small WIP/.test(settingsSrc)) {
+    throw new Error('Stale "Light theme has a small WIP" hint still in SettingsPanel.jsx');
+  }
+});
 
 await test('DropZone: supported formats mentioned (v2.8.1 compact redesign)', () => {
   // v2.8.1 collapsed the ~300 px hero panel into a ~70 px compact bar to
