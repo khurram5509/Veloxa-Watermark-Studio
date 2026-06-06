@@ -160,49 +160,39 @@ export default function DropZone() {
   };
 
   return (
-    <div className="surface-1 rounded-2xl p-5 flex flex-col gap-4">
+    <div className="surface-1 rounded-2xl p-3 flex flex-col gap-3">
+      {/* Compact drop bar (v2.8.1) — user-requested: "reduce the Drag & Drop
+          section area make queue bigger". Was a ~300 px tall hero panel with
+          5 format pills and a big cloud icon; now a single ~70 px row with
+          icon, label, and the Add files / Add folder buttons. The dropzone's
+          drag-receiver functionality is identical — only the visual
+          footprint shrinks. Format support (PDF/DOCX/PPTX) is communicated
+          elsewhere now (the file picker's filter; the queue icons). */}
       <div
         className={`drop-zone relative rounded-xl border-2 border-dashed border-ink-500/50 bg-ink-700/20 transition-all duration-200 ${active ? 'drop-active' : ''}`}
       >
         <motion.div
           initial={false}
           animate={{ scale: active ? 1.01 : 1 }}
-          className="px-8 py-12 flex flex-col items-center text-center gap-3"
+          className="px-4 py-3 flex items-center gap-3"
         >
-          <div className="w-14 h-14 rounded-2xl gradient-veloxa flex items-center justify-center shadow-glow">
-            <UploadCloud className="w-7 h-7 text-white" />
+          <div className="w-9 h-9 rounded-lg gradient-veloxa flex items-center justify-center shadow-glow shrink-0">
+            <UploadCloud className="w-4 h-4 text-white" />
           </div>
-          <div>
-            <div className="text-base font-semibold text-ink-100">
-              Drag & drop files or folders here
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-ink-100 truncate">
+              Drag &amp; drop files or folders here
             </div>
-            <div className="text-xs text-muted mt-1">
-              Bulk-process documents in parallel. Folders are scanned recursively.
+            <div className="text-[11px] text-muted truncate">
+              PDF · DOCX · PPTX — folders scanned recursively
             </div>
           </div>
-          {/* Supported-formats pills — answers "what can this app actually do?" */}
-          <div className="flex flex-wrap items-center justify-center gap-1.5 mt-1">
-            {[
-              { label: 'PDF' },
-              { label: 'DOCX' },
-              { label: 'PPTX' },
-              { label: 'Folder Processing' },
-              { label: 'Recursive Scanning' },
-            ].map(({ label }) => (
-              <span
-                key={label}
-                className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold text-emerald-300/90 bg-emerald-600/10 border border-emerald-500/30 px-2 py-0.5 rounded-full"
-              >
-                <CheckCircle2 className="w-3 h-3"/> {label}
-              </span>
-            ))}
-          </div>
-          <div className="flex gap-2 mt-3">
-            <button onClick={browseFiles} className="btn-outline">
-              <FilePlus2 className="w-4 h-4" /> Add files
+          <div className="flex gap-1.5 shrink-0">
+            <button onClick={browseFiles} className="btn-outline text-xs">
+              <FilePlus2 className="w-3.5 h-3.5" /> Add files
             </button>
-            <button onClick={browseFolder} className="btn-outline">
-              <FolderOpen className="w-4 h-4" /> Add folder
+            <button onClick={browseFolder} className="btn-outline text-xs">
+              <FolderOpen className="w-3.5 h-3.5" /> Add folder
             </button>
           </div>
         </motion.div>

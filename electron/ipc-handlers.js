@@ -137,6 +137,27 @@ function registerIpcHandlers({ getMainWindow }) {
     }
     return { ok: errors.length === 0, deleted, errors };
   });
+
+  // Symmetric to deleteSourceFiles — removes the watermarked OUTPUT file
+  // only, leaves source intact. Two separate menu items in v2.8.1 per the
+  // user's chosen UX: "Delete source from disk" + "Delete output from
+  // disk" each open their own confirm modal so it's never ambiguous which
+  // file is going away.
+  ipcMain.handle('engine:deleteOutputFiles', async (_e, paths) => {
+    if (!Array.isArray(paths) || paths.length === 0) return { ok: true, deleted: [], errors: [] };
+    const deleted = [];
+    const errors = [];
+    for (const p of paths) {
+      try {
+        await fsp.unlink(p);
+        deleted.push(p);
+        logger.info(`Deleted output file at user request: ${path.basename(p)}`);
+      } catch (err) {
+        errors.push({ path: p, error: err.message });
+      }
+    }
+    return { ok: errors.length === 0, deleted, errors };
+  });
   ipcMain.handle('engine:status', () => queue.status());
 
   // ---- Logs ----

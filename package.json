@@ -1,7 +1,7 @@
 {
   "name": "veloxa-watermark-studio",
   "productName": "Veloxa Watermark Studio",
-  "version": "2.8.0",
+  "version": "2.8.1",
   "description": "Automated Bulk Document Watermarking for PDF, DOCX, and PPTX",
   "author": {
     "name": "Veloxa",

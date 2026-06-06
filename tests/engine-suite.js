@@ -662,6 +662,39 @@ await test('reorderJobs preserves jobs missing from the order list (defensive)',
   if (after.jobs.length !== st.jobs.length) throw new Error('reorder dropped jobs!');
 });
 
+// ---- v2.8.1 — discoverable skip-reason copy ---------------------------
+// User reported the conflict guard skips files but they didn't know how
+// to override. The skip's error message now points to the toggle so the
+// fix is one click away. Assert the new copy survives accidental regressions.
+await test('Skip-already-watermarked error message points users to the Settings toggle', async () => {
+  // Build a synthetic PDF with the Veloxa marker so hasVeloxaWatermark fires.
+  const { processPdf } = require(path.join(PROJ, 'engine', 'processors', 'pdf'));
+  const { PDFDocument, StandardFonts } = require(path.join(PROJ, 'node_modules', 'pdf-lib'));
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  doc.addPage([612, 792]).drawText('original', { x: 50, y: 700, size: 20, font });
+  const src = path.join(tmp, 'wm-then-skip-src.pdf');
+  fs.writeFileSync(src, Buffer.from(await doc.save()));
+  const wmOut = path.join(tmp, 'wm-then-skip-wm.pdf');
+  await processPdf({
+    inputPath: src, outputPath: wmOut,
+    profile: { type: 'text', text: 'X', position: 'center', opacity: 0.5, fontFamily: 'Helvetica', fontSize: 36 },
+    settings: { pdfCompression: 'standard' },
+  });
+  // wmOut now has the marker. Enqueue it, expect SKIPPED with the new copy.
+  queue.clearAll();
+  queue.enqueue([wmOut], { id: 'skip-explain', name: 'X', type: 'text', text: 'X', position: 'center' });
+  const d = new Promise(r => queue.events.once('done', r));
+  queue.start();
+  await Promise.race([d, new Promise((_, r) => setTimeout(() => r(new Error('to')), 20000))]);
+  const st = queue.status();
+  const skipped = st.jobs.find(j => j.status === 'skipped');
+  if (!skipped) throw new Error('expected SKIPPED job, got ' + JSON.stringify(st.counts));
+  if (!/Settings.*Conflict detection|Skip already/.test(skipped.error || '')) {
+    throw new Error('Skip reason should point to the Settings toggle. Got: ' + skipped.error);
+  }
+});
+
 await test('removeJob refuses to delete a running job (no orphaned workers)', () => {
   queue.clearAll();
   // Simulate a running job in state directly. Since real "running" requires

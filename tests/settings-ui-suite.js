@@ -195,10 +195,19 @@ const shortcutsSrc = fs.readFileSync(path.join(PROJ, 'src', 'hooks', 'useGlobalS
 const preloadSrc2 = fs.readFileSync(path.join(PROJ, 'electron', 'preload.js'), 'utf8');
 const ipcSrc2 = fs.readFileSync(path.join(PROJ, 'electron', 'ipc-handlers.js'), 'utf8');
 
-await test('DropZone: empty state has format pills', () => {
-  for (const label of ['PDF', 'DOCX', 'PPTX', 'Folder Processing', 'Recursive Scanning']) {
-    if (!dropZoneSrc.includes(`label: '${label}'`)) throw new Error(`pill missing: ${label}`);
+await test('DropZone: supported formats mentioned (v2.8.1 compact redesign)', () => {
+  // v2.8.1 collapsed the ~300 px hero panel into a ~70 px compact bar to
+  // give the queue more vertical room. The 5 format pills + their
+  // CheckCircle2 icons were dropped; format coverage (PDF/DOCX/PPTX) is
+  // now conveyed by a single subtitle line. Test asserts the subtitle
+  // still mentions the three formats so users can see what's supported
+  // without diving into Help. Also guards the Add files / Add folder
+  // affordances against accidental removal in the redesign.
+  for (const fmt of ['PDF', 'DOCX', 'PPTX']) {
+    if (!dropZoneSrc.includes(fmt)) throw new Error(`Format mention missing in DropZone copy: ${fmt}`);
   }
+  if (!/Add files/.test(dropZoneSrc)) throw new Error('Add files button missing');
+  if (!/Add folder/.test(dropZoneSrc)) throw new Error('Add folder button missing');
 });
 await test('DropZone: shows StatTile with count + size + ETA', () => {
   if (!/StatTile/.test(dropZoneSrc)) throw new Error('StatTile component missing');

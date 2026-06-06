@@ -57,8 +57,9 @@ export default function QueuePanel() {
   // Right-click context menu — null when closed; an object when open.
   const [contextMenu, setContextMenu] = useState(null);
 
-  // Destructive-delete confirm modal state. `targets` is the list of
-  // {id, source} pairs the user wants to delete; null = modal closed.
+  // Destructive-delete confirm modal state. `kind` is 'source' or 'output'
+  // so the same modal component handles both flows; `targets` is the list
+  // of {id, source, output} pairs the user wants to delete; null = closed.
   const [confirmDelete, setConfirmDelete] = useState(null);
 
   // When jobs are removed from the queue we prune them from selectedIds
@@ -311,13 +312,20 @@ export default function QueuePanel() {
     setSelectedIds(new Set());
   }, [v, buildTargetIds]);
 
-  const handleDeleteFromDisk = useCallback((anchorJob) => {
+  // Two separate flows per v2.8.1 spec: "Delete source from disk" vs
+  // "Delete output from disk". Each gets its own context menu item so
+  // it's never ambiguous which file is going away. kind: 'source' | 'output'.
+  const handleDeleteFromDisk = useCallback((anchorJob, kind = 'source') => {
     const ids = buildTargetIds(anchorJob.id);
     const targets = ids
       .map((id) => queue.jobs.find((j) => j.id === id))
       .filter(Boolean)
-      .map((j) => ({ id: j.id, source: j.input }));
-    setConfirmDelete({ targets });
+      .map((j) => ({ id: j.id, source: j.input, output: j.output || null }));
+    // For "output" delete, drop rows that don't have an output yet — there's
+    // nothing on disk to remove for them.
+    const filtered = kind === 'output' ? targets.filter((t) => !!t.output) : targets;
+    if (filtered.length === 0) return;
+    setConfirmDelete({ kind, targets: filtered });
   }, [queue.jobs, buildTargetIds]);
 
   // ---- Progress bar ---------------------------------------------------
@@ -533,25 +541,28 @@ export default function QueuePanel() {
         />
       )}
 
-      {/* ---- Delete-from-disk confirm modal ---- */}
+      {/* ---- Delete-from-disk confirm modal (source OR output) ---- */}
       {confirmDelete && (
         <ConfirmDeleteModal
+          kind={confirmDelete.kind}
           targets={confirmDelete.targets}
           onCancel={() => setConfirmDelete(null)}
           onConfirm={async () => {
-            const paths = confirmDelete.targets.map((t) => t.source);
-            const result = await v?.engine?.deleteSourceFiles(paths);
+            const paths = confirmDelete.targets.map((t) =>
+              confirmDelete.kind === 'output' ? t.output : t.source);
+            const result = confirmDelete.kind === 'output'
+              ? await v?.engine?.deleteOutputFiles(paths)
+              : await v?.engine?.deleteSourceFiles(paths);
             setConfirmDelete(null);
             if (result && result.errors && result.errors.length > 0) {
               // Surface failures inline (not a toast — those weren't part of
-              // this slice). The user will see the source still present in
+              // this slice). The user will see the file still present in
               // Explorer; that's the signal a delete failed.
-              console.warn('deleteSourceFiles partial:', result);
+              console.warn(`delete${confirmDelete.kind === 'output' ? 'Output' : 'Source'}Files partial:`, result);
             }
-            // Don't remove the rows from the queue — the user only asked
-            // to delete the SOURCE; the row tracks the output, which may
-            // still be valuable. They can dismiss rows via Remove from
-            // Queue if they want.
+            // Don't auto-remove rows from the queue — the user might want
+            // to inspect or re-process; let them dismiss via "Remove from
+            // Queue" separately if they want.
           }}
         />
       )}
@@ -600,7 +611,18 @@ function ContextMenu({ x, y, job, selectionCount, actions, onClose }) {
     { icon: RotateCcw, label: `Retry${isMulti ? ' rows' + labelSuffix : ''}`, onClick: () => actions.retry(job), disabled: !canRetry },
     { divider: true },
     { icon: X, label: `Remove from queue${labelSuffix}`, onClick: () => actions.remove(job) },
-    { icon: Trash, label: `Delete source from disk${labelSuffix}`, onClick: () => actions.deleteFromDisk(job), danger: true },
+    // Two separate delete items per v2.8.1 spec — each opens its own
+    // confirm modal. Source delete propagates through cloud sync (Dropbox
+    // / OneDrive / iCloud) to all devices; output delete is local-only
+    // unless the user chose to put outputs on a synced path.
+    { icon: Trash, label: `Delete source from disk${labelSuffix}`, onClick: () => actions.deleteFromDisk(job, 'source'), danger: true },
+    {
+      icon: Trash,
+      label: `Delete output from disk${labelSuffix}`,
+      onClick: () => actions.deleteFromDisk(job, 'output'),
+      danger: true,
+      disabled: !canShowOutput && !isMulti,
+    },
   ];
 
   return (
@@ -645,10 +667,10 @@ function ContextMenu({ x, y, job, selectionCount, actions, onClose }) {
 // (no quick-confirm). Lists the source paths so the user knows exactly
 // what gets unlinked. Esc cancels; Enter on focused button confirms.
 // =========================================================================
-function ConfirmDeleteModal({ targets, onCancel, onConfirm }) {
+function ConfirmDeleteModal({ kind = 'source', targets, onCancel, onConfirm }) {
   // Local "I understand" checkbox to avoid one-click destructive accidents.
-  // Required because the user's chosen behavior was "Just source (output
-  // stays)" which is the riskiest option — easy to lose work if misclicked.
+  // Both 'source' and 'output' delete paths require it — the kinds differ
+  // only in which file gets unlinked and the warning copy.
   const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
@@ -659,6 +681,27 @@ function ConfirmDeleteModal({ targets, onCancel, onConfirm }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onCancel]);
 
+  // Copy adapts to kind: 'source' or 'output'.
+  const isOutput = kind === 'output';
+  const fileWord = isOutput ? 'output file' : 'source file';
+  const title = `Delete ${fileWord}${targets.length === 1 ? '' : 's'} from disk?`;
+  const warning = isOutput
+    ? (
+      <>
+        This permanently removes the watermarked output{targets.length === 1 ? '' : 's'} from your filesystem.
+        {' '}<b className="text-ink-100">Source documents are NOT touched</b> — your originals stay intact.
+        {' '}You can re-create the output{targets.length === 1 ? '' : 's'} by re-processing the source through the queue.
+      </>
+    ) : (
+      <>
+        This permanently removes the source document{targets.length === 1 ? '' : 's'} from your filesystem.
+        {' '}<b className="text-ink-100">Watermarked outputs are NOT touched</b> — they stay where they are.
+        {' '}Cannot be undone, and may propagate the delete through cloud sync (Dropbox / OneDrive / iCloud)
+        to all your devices.
+      </>
+    );
+  const pathOf = (t) => isOutput ? t.output : t.source;
+
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div className="surface-1 rounded-xl border border-rose-500/40 max-w-md w-full p-5">
@@ -667,18 +710,13 @@ function ConfirmDeleteModal({ targets, onCancel, onConfirm }) {
             <AlertTriangle className="w-4 h-4"/>
           </div>
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold">Delete source file{targets.length === 1 ? '' : 's'} from disk?</h3>
-            <p className="text-xs text-muted mt-1">
-              This permanently removes the source document{targets.length === 1 ? '' : 's'} from your filesystem.
-              {' '}<b className="text-ink-100">Watermarked outputs are NOT touched</b> — they stay where they are.
-              {' '}Cannot be undone, and may propagate the delete through cloud sync (Dropbox / OneDrive / iCloud)
-              to all your devices.
-            </p>
+            <h3 className="text-sm font-semibold">{title}</h3>
+            <p className="text-xs text-muted mt-1">{warning}</p>
           </div>
         </div>
         <div className="surface-2 rounded-lg p-2 max-h-40 overflow-auto text-[11px] font-mono space-y-0.5 mb-3">
           {targets.map((t) => (
-            <div key={t.id} className="truncate text-muted" title={t.source}>{t.source}</div>
+            <div key={t.id} className="truncate text-muted" title={pathOf(t)}>{pathOf(t)}</div>
           ))}
         </div>
         <label className="flex items-start gap-2 text-xs cursor-pointer mb-3">
@@ -701,7 +739,7 @@ function ConfirmDeleteModal({ targets, onCancel, onConfirm }) {
                 : 'bg-rose-600/40 text-white/60 cursor-not-allowed'
             }`}
           >
-            <Trash className="w-3.5 h-3.5"/> Delete {targets.length === 1 ? '1 file' : `${targets.length} files`}
+            <Trash className="w-3.5 h-3.5"/> Delete {targets.length === 1 ? `1 ${fileWord}` : `${targets.length} ${fileWord}s`}
           </button>
         </div>
       </div>

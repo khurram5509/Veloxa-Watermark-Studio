@@ -3,6 +3,13 @@ import { Minus, Square, X, Sparkles } from 'lucide-react';
 
 export default function TitleBar() {
   const v = window.veloxa;
+  // v2.8.1: read the live app version from the preload bridge instead of
+  // hardcoding it. The previous string "v2.4.1" was baked into JSX since
+  // v2.4.1 and never got bumped, so every install reported the same wrong
+  // version in the title bar — the source of the user-reported "After
+  // installing the 2.8.1 version still its shows the old version" bug.
+  // Falls back to '?' so a render before veloxa is ready doesn't crash.
+  const appVersion = v?.versions?.app || '?';
   return (
     <div className="app-drag h-9 flex items-center justify-between px-3 bg-ink-800/95 border-b border-ink-600/50 select-none">
       <div className="flex items-center gap-2">
@@ -12,7 +19,7 @@ export default function TitleBar() {
         <span className="text-xs font-semibold tracking-wide text-ink-100">
           Veloxa Watermark Studio
         </span>
-        <span className="text-[10px] uppercase tracking-widest text-ink-200/50">v2.4.1</span>
+        <span className="text-[10px] uppercase tracking-widest text-ink-200/50">v{appVersion}</span>
       </div>
       <div className="app-no-drag flex items-center">
         <button onClick={() => v?.window.minimize()} className="w-9 h-9 hover:bg-white/5 flex items-center justify-center text-ink-100">

@@ -88,7 +88,7 @@ export default function HelpModal({ open, onClose }) {
             </div>
 
             <div className="px-5 py-2.5 border-t border-ink-600/40 flex items-center justify-between text-[11px] text-muted">
-              <span>Veloxa Watermark Studio · v2.4.1</span>
+              <span>Veloxa Watermark Studio · v{(typeof window !== 'undefined' && window.veloxa?.versions?.app) || '?'}</span>
               <span>Press F12 anytime for renderer DevTools.</span>
             </div>
           </motion.div>
@@ -358,10 +358,11 @@ npx @electron/packager . "Veloxa Watermark Studio" \\
 }
 
 function License() {
+  const appVersion = (typeof window !== 'undefined' && window.veloxa?.versions?.app) || '?';
   return (
     <div>
       <H>License</H>
-      <P><b>Veloxa Watermark Studio v2.4.1</b></P>
+      <P><b>Veloxa Watermark Studio v{appVersion}</b></P>
       <P>Copyright © 2026 Veloxa. All rights reserved.</P>
 
       <H>Terms</H>

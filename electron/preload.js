@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld('veloxa', {
     moveJobsTo: (jobIds, where) => invoke('engine:moveJobsTo', jobIds, where),
     reorderJobs: (orderedIds) => invoke('engine:reorderJobs', orderedIds),
     deleteSourceFiles: (paths) => invoke('engine:deleteSourceFiles', paths),
+    deleteOutputFiles: (paths) => invoke('engine:deleteOutputFiles', paths),
     clearAll: () => invoke('engine:clearAll'),
     status: () => invoke('engine:status'),
     validateProfile: (profile) => invoke('engine:validateProfile', profile),

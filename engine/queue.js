@@ -170,11 +170,17 @@ async function runOne(job) {
 
     // Conflict detection — if the input already carries a Veloxa watermark
     // and the user has skipAlreadyWatermarked enabled (default true), bail.
+    //
+    // User-reported v2.8.1: "I am using 2nd time an other profile but still
+    // its not working" — the conflict check is intentional safety against
+    // double-stamping, but it doesn't differentiate by profile. The skip
+    // message now points users at the toggle so they can override when
+    // they meant to re-watermark with a different profile.
     if (cfg.skipAlreadyWatermarked !== false) {
       try {
         if (await hasVeloxaWatermark(job.input)) {
           job.status = STATUS.SKIPPED;
-          job.error = 'Already watermarked by Veloxa';
+          job.error = 'Already watermarked — turn off "Skip already-watermarked files" in Settings → Conflict detection to re-process';
           job.durationMs = Date.now() - start;
           logger.warn(`Skipped (already watermarked): ${path.basename(job.input)}`, { jobId: job.id });
           return;
