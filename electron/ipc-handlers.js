@@ -484,8 +484,13 @@ function registerIpcHandlers({ getMainWindow }) {
     return sizes;
   });
 
-  // ---- System info for Performance Advisor (v2.6.0) ----
-  ipcMain.handle('app:getSystemInfo', async () => {
+  // ---- System info for Performance Advisor (v2.6.0, GPU added v2.7.6) ----
+  // Returns CPU + memory + arch (the original v2.6.0 shape that the
+  // Performance Advisor / Settings panel already reads), AUGMENTED with
+  // GPU detection from engine/sysinfo.js. Cached after first call.
+  // Pass `{ refresh: true }` to force a re-probe (rare — hardware doesn't
+  // change at runtime, but tests use it).
+  ipcMain.handle('app:getSystemInfo', async (_e, opts = {}) => {
     const os = require('node:os');
     const cpus = os.cpus() || [];
     const cpuCores = cpus.length;
@@ -498,7 +503,23 @@ function registerIpcHandlers({ getMainWindow }) {
     // returns past that for the kind of work we do — most PDFs serialize on
     // pdf-lib's single-threaded zlib).
     const recommendedConcurrent = Math.max(2, Math.min(8, cpuCores - 2));
+
+    // GPU probe — wmic on Win, system_profiler on Mac, lspci on Linux.
+    // 5-second timeout per spawn; failure returns empty `gpus: []` rather
+    // than throwing. We never use the GPU for actual document processing
+    // (pdf-lib + pizzip + Office COM are all CPU-bound) — this is purely
+    // informational so users see what the engine sees on their machine.
+    let gpus = [];
+    let gpuUsedByEngine = false;
+    try {
+      const sysinfo = require('../engine/sysinfo');
+      const info = await sysinfo.getSystemInfo({ refresh: opts && opts.refresh });
+      gpus = info.gpus || [];
+      gpuUsedByEngine = !!info.gpuUsedByEngine;
+    } catch { /* probe failed — silent */ }
+
     return {
+      // Original v2.6.0 shape — Settings panel reads these fields directly
       cpuCores,
       cpuModel,
       totalRamGb,
@@ -506,6 +527,9 @@ function registerIpcHandlers({ getMainWindow }) {
       platform: process.platform,
       arch: process.arch,
       recommendedConcurrent,
+      // New v2.7.6 fields
+      gpus,
+      gpuUsedByEngine,
     };
   });
 

@@ -175,7 +175,43 @@ try {
   $word = New-Object -ComObject Word.Application;
   $word.Visible = $false;
   $word.DisplayAlerts = 0;
-  $doc = $word.Documents.Open("${psEscape(input)}", $false, $true, $false);
+  # AutomationSecurity 3 = msoAutomationSecurityForceDisable — silently
+  # blocks macros so VBA AutoOpen / Document_Open routines can't pop modal
+  # dialogs that would deadlock the COM call. The earlier code only set
+  # DisplayAlerts, which suppresses runtime warnings but not macro-driven
+  # MsgBox / file-locked-by-another-user / "Enable Editing" Protected
+  # View prompts.
+  try { $word.AutomationSecurity = 3 } catch {}
+  # Skip slow per-file behaviors that Word does by default and that don't
+  # affect the PDF we ultimately export. Each shaves real wall-clock time
+  # off large docs and one of them (UpdateLinksAtOpen) blocks if a linked
+  # file is unreachable.
+  try { $word.Options.UpdateLinksAtOpen = $false } catch {}
+  try { $word.Options.SaveNormalPrompt = $false } catch {}
+  try { $word.Options.CheckGrammarAsYouType = $false } catch {}
+  try { $word.Options.CheckSpellingAsYouType = $false } catch {}
+  # Documents.Open signature (positional):
+  #   FileName, ConfirmConversions, ReadOnly, AddToRecentFiles,
+  #   PasswordDocument, PasswordTemplate, Revert, WritePasswordDocument,
+  #   WritePasswordTemplate, Format, Encoding, Visible, OpenAndRepair,
+  #   DocumentDirection, NoEncodingDialog, XMLTransform
+  # OpenAndRepair=$true rescues mildly-corrupt docs that would otherwise
+  # throw "The file is corrupt" without manual user intervention.
+  $doc = $word.Documents.Open(
+    "${psEscape(input)}",
+    $false, $true, $false,
+    [Type]::Missing, [Type]::Missing, $false,
+    [Type]::Missing, [Type]::Missing, [Type]::Missing, [Type]::Missing,
+    $false,
+    $true
+  );
+  # Protected View bypass: documents synced from Dropbox / OneDrive /
+  # downloaded via browser carry MOTW (Mark-of-the-Web). Word opens them
+  # in Protected View by default, which lets us read but refuses
+  # ExportAsFixedFormat. Calling Edit() forces it into a fully-trusted
+  # editable state. Wrapped in try/catch because the call no-ops on docs
+  # NOT in Protected View — calling Edit() there throws.
+  try { if ($doc.ProtectedViewWindow) { $doc = $doc.ProtectedViewWindow.Edit() } } catch {}
   # Word.WdExportFormat.wdExportFormatPDF = 17
   # OptimizeFor: 0 = print (high quality), 1 = screen (smaller file)
   # IncludeDocProps: $true; KeepIRM: $true; CreateBookmarks: 0 (none)
@@ -215,7 +251,12 @@ $ppt = $null; $pres = $null;
 $err = $null;
 try {
   $ppt = New-Object -ComObject PowerPoint.Application;
+  # AutomationSecurity 3 = msoAutomationSecurityForceDisable — same Protected
+  # View / macro suppression rationale as the Word path.
+  try { $ppt.AutomationSecurity = 3 } catch {}
   # PowerPoint can't fully hide its window on most versions — leave default
+  # Presentations.Open(FileName, ReadOnly, Untitled, WithWindow)
+  # ReadOnly=msoTrue avoids autosave / lock prompts on Dropbox-synced files.
   $pres = $ppt.Presentations.Open("${psEscape(input)}", $true, $false, $false);
   # PpSaveAsFileType.ppSaveAsPDF = 32
   $pres.SaveAs("${psEscape(output)}", 32);
@@ -235,6 +276,46 @@ try {
 if ($err) { Write-Output (@{ ok = $false; error = $err } | ConvertTo-Json -Compress); exit 1 }
 else { Write-Output '{"ok":true}'; exit 0 }
 `;
+
+// Extract the structured `{ok:false, error:"..."}` JSON the WORD/POWERPOINT
+// scripts emit on failure. The previous regex-only path missed nested braces
+// (e.g. error strings containing `{` from Word's exception text) and any
+// time the JSON wrapped onto multiple lines, so users saw "exit 1" without
+// the actual Office error. This walks each non-empty stdout line, JSON-parses,
+// and returns the first parseable `{ok:false}` it finds.
+function extractStructuredError(stdout) {
+  if (!stdout) return null;
+  const lines = String(stdout).trim().split(/\r?\n/).filter(Boolean).reverse();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{')) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && parsed.ok === false && parsed.error) return String(parsed.error);
+    } catch { /* try next line */ }
+  }
+  return null;
+}
+
+// Best-effort MOTW (Mark-of-the-Web) strip on the input file. When files
+// originate from a download / sync / network share, Windows attaches a
+// `:Zone.Identifier` alternate data stream so Office treats them as
+// "potentially unsafe" and opens them in Protected View — which then
+// blocks ExportAsFixedFormat. Removing the ADS opens Word's edit path.
+// No-op + silent if the file has no ADS (the common case for fresh writes).
+function stripMOTW(p) {
+  try { fs.unlinkSync(p + ':Zone.Identifier'); } catch { /* not present, fine */ }
+}
+
+// COM RPC blips, "Documents already in use", or a winword.exe that didn't
+// release between fast-fire calls all look like transient exit-1 failures
+// the second attempt clears. Errors that are deterministic (file actually
+// missing, file corrupt, file password-protected) won't be helped by a
+// retry, but they don't get hurt either — they fail the same way faster.
+function isTransientCOMError(message) {
+  if (!message) return false;
+  return /RPC|0x800[A-F0-9]{5}|already in use|server execution failed|busy|locked|access denied|in use by another/i.test(message);
+}
 
 async function convertToPdf(inputPath, outputPath, options = {}) {
   const quality = options.quality === 'high' ? 'high' : 'standard';
@@ -258,43 +339,85 @@ async function convertToPdf(inputPath, outputPath, options = {}) {
   const absIn = path.resolve(inputPath);
   const absOut = path.resolve(outputPath);
 
+  // Strip MOTW so Word doesn't put the doc into Protected View (which
+  // refuses programmatic ExportAsFixedFormat). Best-effort; if the ADS
+  // isn't present, the call no-ops silently.
+  stripMOTW(absIn);
+
+  // If a prior failed convert left a partial .pdf in the output path,
+  // Word's ExportAsFixedFormat throws "the file is in use" instead of
+  // overwriting. Clear it before re-attempting.
+  if (fs.existsSync(absOut)) {
+    try { fs.unlinkSync(absOut); } catch { /* will surface as the real failure below */ }
+  }
+
   const script = ext === 'docx'
     ? WORD_SCRIPT(absIn, absOut, quality)
     : POWERPOINT_SCRIPT(absIn, absOut, quality);
 
   const appName = ext === 'docx' ? 'Microsoft Word' : 'Microsoft PowerPoint';
-  let stdout;
-  try {
-    stdout = await runPowerShell(script, 180_000);
-  } catch (err) {
-    // PowerShell exited non-zero — script also wrote a JSON error to stdout.
-    // err.message includes whatever stderr captured; check stdout for the
-    // structured Office error too.
-    if (err.stdout) {
-      const m = String(err.stdout).match(/\{[^}]*"ok":\s*false[^}]*"error":\s*"([^"]+)"/);
-      if (m) throw new Error(`${appName} convert failed: ${m[1]}`);
-    }
-    throw new Error(`${appName} convert failed: ${err.message}`);
-  }
 
-  // Even on exit 0, defensively parse the JSON to confirm success.
-  const lines = String(stdout).trim().split(/\r?\n/).filter(Boolean);
-  const last = lines[lines.length - 1];
-  if (last && last.startsWith('{')) {
+  // One retry on transient COM errors. ~1 s pause between attempts gives
+  // a stuck winword.exe / ppt.exe time to release. Bounded at 2 attempts
+  // total so a genuinely-broken file doesn't double its already-long
+  // failure wall-clock.
+  const MAX_ATTEMPTS = 2;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let stdout;
     try {
-      const parsed = JSON.parse(last);
-      if (parsed.ok === false) throw new Error(`${appName} convert failed: ${parsed.error || 'unknown'}`);
-    } catch (parseErr) {
-      // Non-JSON output is fine if the file exists; surface the parse failure
-      // only when nothing was produced.
-      if (!fs.existsSync(absOut)) throw parseErr;
+      stdout = await runPowerShell(script, 180_000);
+    } catch (err) {
+      // PowerShell exited non-zero — extract the structured Office error
+      // first (much better UX than "PowerShell exited with code 1"), then
+      // decide whether to retry.
+      const structured = extractStructuredError(err.stdout);
+      const message = structured || err.message || 'unknown';
+      lastErr = new Error(`${appName} convert failed: ${message}`);
+
+      if (attempt < MAX_ATTEMPTS && isTransientCOMError(message)) {
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      throw lastErr;
     }
+
+    // Even on exit 0, defensively parse the JSON to confirm success.
+    const structuredErr = extractStructuredError(stdout);
+    if (structuredErr) {
+      lastErr = new Error(`${appName} convert failed: ${structuredErr}`);
+      if (attempt < MAX_ATTEMPTS && isTransientCOMError(structuredErr)) {
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      throw lastErr;
+    }
+
+    if (!fs.existsSync(absOut)) {
+      lastErr = new Error(`${appName} reported success but output not found: ${absOut}`);
+      // Treat missing-output as transient — Office sometimes returns
+      // before the file is fully flushed to disk.
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 500));
+        if (fs.existsSync(absOut)) return absOut;
+        continue;
+      }
+      throw lastErr;
+    }
+
+    return absOut;
   }
 
-  if (!fs.existsSync(absOut)) {
-    throw new Error(`${appName} reported success but output not found: ${absOut}`);
-  }
-  return absOut;
+  // Should be unreachable — every loop iteration either returns or throws.
+  throw lastErr || new Error(`${appName} convert failed: exhausted retries`);
 }
 
-module.exports = { status, isAvailable, convertToPdf };
+module.exports = {
+  status,
+  isAvailable,
+  convertToPdf,
+  // exposed for tests
+  extractStructuredError,
+  isTransientCOMError,
+  stripMOTW,
+};

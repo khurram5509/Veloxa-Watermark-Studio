@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import {
   FolderOpen, Trash2, RefreshCw, CheckCircle2, AlertTriangle, Download,
-  ExternalLink, Loader2, Github, Info, Cpu, MemoryStick, Sparkles,
+  ExternalLink, Loader2, Github, Info, Cpu, MemoryStick, Sparkles, Zap,
   Search, Database, Bell, ShieldCheck, FileText,
   Sun, Moon, Copy, Upload, RotateCcw,
 } from 'lucide-react';
@@ -371,17 +371,40 @@ function PerformanceBody({ settings, set }) {
       </Row>
       <div className="rounded-xl border border-ink-500/40 bg-ink-700/30 p-4">
         <div className="text-[10px] uppercase tracking-widest text-muted mb-2">Detected hardware</div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <HardwareTile icon={Sparkles} label="Recommended" value={sys ? sys.recommendedConcurrent : '…'} highlight
             hint="leaves 2 cores for the OS/UI, capped at 8 (diminishing returns past that)"/>
           <HardwareTile icon={Cpu} label="CPU" value={sys ? `${sys.cpuCores} cores` : '…'} hint={sys ? sys.cpuModel : ''}/>
           <HardwareTile icon={MemoryStick} label="RAM" value={sys ? `${sys.totalRamGb} GB` : '…'}
             hint={sys ? `${sys.freeRamGb} GB free right now` : ''}/>
+          <HardwareTile
+            icon={Zap}
+            label="GPU"
+            value={sys ? (sys.gpus && sys.gpus.length > 0
+              ? (sys.gpus[0].vendor !== 'unknown' ? sys.gpus[0].vendor : sys.gpus[0].name.split(' ')[0])
+              : 'None') : '…'}
+            hint={sys && sys.gpus && sys.gpus.length > 0
+              ? `${sys.gpus[0].name}${sys.gpus.length > 1 ? ` (+${sys.gpus.length - 1} more)` : ''} · not used by engine`
+              : 'no discrete GPU detected'}/>
         </div>
         {sys && current > sys.cpuCores && (
           <div className="mt-3 text-xs text-amber-300 flex items-center gap-1.5">
             <AlertTriangle className="w-3.5 h-3.5"/>
             You're requesting {current} workers but only have {sys.cpuCores} cores — extras will idle.
+          </div>
+        )}
+        {/* Be honest about GPU: it's detected but our pipeline (pdf-lib /
+            pizzip / Office COM) is CPU-bound. Surfacing this explicitly
+            answers "is my GPU helping?" without anyone having to guess. */}
+        {sys && sys.gpus && sys.gpus.length > 0 && (
+          <div className="mt-2 text-[11px] text-muted flex items-start gap-1.5">
+            <Info className="w-3 h-3 mt-0.5 shrink-0"/>
+            <span>
+              GPU detected but not used for watermarking — the pipeline
+              (PDF / DOCX / PPTX) is CPU-bound. Adding cores helps; adding
+              a GPU does not. Performance scales with the <b>CPU cores</b>
+              tile above.
+            </span>
           </div>
         )}
       </div>

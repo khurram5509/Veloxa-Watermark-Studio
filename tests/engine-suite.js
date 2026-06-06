@@ -909,6 +909,108 @@ sp.kill();
 await new Promise(r => sp.once('close', r));
 
 // =====================================================================
+header('20. Office COM convert helpers (v2.7.6 — Protected View + retry + error parsing)');
+const msoffice = require(path.join(PROJ, 'engine', 'converters', 'msoffice'));
+
+await test('extractStructuredError pulls error from single-line JSON', () => {
+  const e = msoffice.extractStructuredError('{"ok":false,"error":"Word could not open the file"}');
+  if (e !== 'Word could not open the file') throw new Error('got: ' + e);
+});
+await test('extractStructuredError reads the LAST JSON line (handles preamble noise)', () => {
+  const stdout = 'some random preamble\n{"ok":true}\n{"ok":false,"error":"final error"}';
+  const e = msoffice.extractStructuredError(stdout);
+  if (e !== 'final error') throw new Error('got: ' + e);
+});
+await test('extractStructuredError survives JSON with escaped quotes inside the error', () => {
+  const e = msoffice.extractStructuredError('{"ok":false,"error":"Open failed: \\"the document is read-only\\""}');
+  if (!e || !/document is read-only/.test(e)) throw new Error('got: ' + e);
+});
+await test('extractStructuredError returns null for malformed JSON', () => {
+  if (msoffice.extractStructuredError('not json') !== null) throw new Error();
+  if (msoffice.extractStructuredError('') !== null) throw new Error();
+  if (msoffice.extractStructuredError(null) !== null) throw new Error();
+});
+await test('extractStructuredError ignores ok:true (success doesn\'t look like an error)', () => {
+  if (msoffice.extractStructuredError('{"ok":true}') !== null) throw new Error();
+});
+
+await test('isTransientCOMError flags RPC blips, busy, locked, "already in use"', () => {
+  const transient = [
+    'RPC server is unavailable',
+    'The server execution failed',
+    'Documents already in use',
+    'File is locked by another user',
+    'Access denied',
+    'The file is in use by another application',
+    '0x800AC472 hresult',
+  ];
+  for (const m of transient) {
+    if (!msoffice.isTransientCOMError(m)) throw new Error('should be transient: ' + m);
+  }
+});
+await test('isTransientCOMError does NOT flag genuinely-broken errors (no needless retry)', () => {
+  const permanent = [
+    'The file could not be found',
+    'File is corrupt: header is invalid',
+    'Password required',
+    'Document part missing: /word/document.xml',
+  ];
+  for (const m of permanent) {
+    if (msoffice.isTransientCOMError(m)) throw new Error('should be permanent: ' + m);
+  }
+});
+await test('isTransientCOMError handles null/undefined', () => {
+  if (msoffice.isTransientCOMError(null)) throw new Error();
+  if (msoffice.isTransientCOMError(undefined)) throw new Error();
+  if (msoffice.isTransientCOMError('')) throw new Error();
+});
+
+await test('stripMOTW does not throw when ADS is absent', () => {
+  const tmpFile = path.join(os.tmpdir(), 'motw-test-' + Date.now() + '.docx');
+  fs.writeFileSync(tmpFile, 'x');
+  msoffice.stripMOTW(tmpFile); // no MOTW present — must not throw
+  if (!fs.existsSync(tmpFile)) throw new Error('stripMOTW removed the actual file!');
+  fs.unlinkSync(tmpFile);
+});
+
+// =====================================================================
+header('21. System info / GPU detection (v2.7.6)');
+const sysinfo = require(path.join(PROJ, 'engine', 'sysinfo'));
+
+await test('getSystemInfo returns platform + arch + cpuCount', async () => {
+  const info = await sysinfo.getSystemInfo();
+  if (info.platform !== process.platform) throw new Error('platform mismatch');
+  if (info.arch !== process.arch) throw new Error('arch mismatch');
+  if (typeof info.cpuCount !== 'number' || info.cpuCount < 1) throw new Error('cpuCount missing');
+  if (typeof info.totalMemGB !== 'number' || info.totalMemGB < 0.1) throw new Error('totalMemGB missing');
+});
+await test('getSystemInfo caches across calls (hardware is static)', async () => {
+  const a = await sysinfo.getSystemInfo();
+  const b = await sysinfo.getSystemInfo();
+  if (a !== b) throw new Error('different references — not cached');
+});
+await test('getSystemInfo recommendedWorkers = max(1, cores - 1)', async () => {
+  const info = await sysinfo.getSystemInfo();
+  const expected = Math.max(1, info.cpuCount - 1);
+  if (info.recommendedWorkers !== expected) throw new Error(`got ${info.recommendedWorkers} expected ${expected}`);
+});
+await test('getSystemInfo gpuUsedByEngine === false (pipeline is CPU-bound; we tell the truth)', async () => {
+  const info = await sysinfo.getSystemInfo();
+  if (info.gpuUsedByEngine !== false) throw new Error('engine doesn\'t use GPU; this should be false');
+});
+await test('getSystemInfo includes a `gpus` array (may be empty on test hosts)', async () => {
+  const info = await sysinfo.getSystemInfo();
+  if (!Array.isArray(info.gpus)) throw new Error('gpus must be an array');
+});
+await test('vendorFromName classifies common GPU names', () => {
+  if (sysinfo.vendorFromName('NVIDIA GeForce RTX 3060') !== 'NVIDIA') throw new Error();
+  if (sysinfo.vendorFromName('AMD Radeon RX 6700 XT') !== 'AMD') throw new Error();
+  if (sysinfo.vendorFromName('Intel UHD Graphics 770') !== 'Intel') throw new Error();
+  if (sysinfo.vendorFromName('Apple M2 GPU') !== 'Apple') throw new Error();
+  if (sysinfo.vendorFromName('') !== 'unknown') throw new Error();
+});
+
+// =====================================================================
 await queue.destroyPool().catch(() => {});
 
 console.log('');
