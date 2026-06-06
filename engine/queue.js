@@ -389,6 +389,144 @@ function removeJob(jobId) {
   emitUpdated();
   return publicState();
 }
+
+// ---- Multi-row ops for the v2.8.0 queue management UI -------------------
+// Each of these takes an array of job IDs from a selection and applies the
+// op to ALL of them at once. The single-row callers (removeJob etc.) stay
+// for back-compat with v2.7.x callers.
+
+// Bulk remove. Same running-job guard as removeJob.
+function removeJobs(jobIds) {
+  if (!Array.isArray(jobIds) || jobIds.length === 0) return publicState();
+  const ids = new Set(jobIds);
+  state.jobs = state.jobs.filter((j) => !ids.has(j.id) || j.status === STATUS.RUNNING);
+  emitUpdated();
+  return publicState();
+}
+
+// "Done" = anything that finished. The user's screenshot showed only a
+// single button labelled "Clear done" — they explicitly wanted Success +
+// Failed + Skipped grouped under one action. clearCompleted (success-only)
+// and clearFailed (failed-only) stay as separate exports for callers that
+// want the finer-grained behavior.
+function clearDone() {
+  state.jobs = state.jobs.filter((j) =>
+    j.status !== STATUS.SUCCESS && j.status !== STATUS.FAILED && j.status !== STATUS.SKIPPED);
+  emitUpdated();
+  return publicState();
+}
+
+// Duplicate selected rows as new PENDING jobs with fresh IDs. Inserted
+// right after their source row so the dup'd version is visually adjacent
+// to the original — easier to see what just happened. Running jobs can
+// be duplicated (the duplicate starts as pending) but the running row
+// itself is untouched.
+function duplicateJobs(jobIds) {
+  if (!Array.isArray(jobIds) || jobIds.length === 0) return publicState();
+  const ids = new Set(jobIds);
+  const out = [];
+  for (const j of state.jobs) {
+    out.push(j);
+    if (ids.has(j.id)) {
+      out.push({
+        id: crypto.randomUUID(),
+        input: j.input,
+        profile: j.profile,
+        status: STATUS.PENDING,
+      });
+    }
+  }
+  state.jobs = out;
+  emitUpdated();
+  if (!state.running) start();
+  return publicState();
+}
+
+// Retry specific rows (success OR failed OR skipped). The existing
+// retryFailed re-queues ALL failed — this takes a selection. Resets
+// `error`, `output`, `durationMs`, `bytes` so the row looks pristine.
+function retryRows(jobIds) {
+  if (!Array.isArray(jobIds) || jobIds.length === 0) return publicState();
+  const ids = new Set(jobIds);
+  for (const j of state.jobs) {
+    if (!ids.has(j.id)) continue;
+    if (j.status === STATUS.RUNNING) continue; // can't retry mid-flight
+    j.status = STATUS.PENDING;
+    j.error = null;
+    j.output = null;
+    j.durationMs = undefined;
+    j.bytes = undefined;
+  }
+  emitUpdated();
+  if (!state.running) start();
+  return publicState();
+}
+
+// Move N rows to the very top of the queue. Selected rows keep their
+// relative order with each other; everything else slides down. Running
+// rows refuse to move (a running worker holds the row's index in the
+// processing loop; reordering it would point the loop at a different
+// row mid-stream).
+function moveJobsTo(jobIds, where) {
+  if (!Array.isArray(jobIds) || jobIds.length === 0) return publicState();
+  if (where !== 'top' && where !== 'bottom') return publicState();
+  const ids = new Set(jobIds);
+  const moving = [];
+  const staying = [];
+  for (const j of state.jobs) {
+    if (ids.has(j.id) && j.status !== STATUS.RUNNING) moving.push(j);
+    else staying.push(j);
+  }
+  state.jobs = where === 'top' ? [...moving, ...staying] : [...staying, ...moving];
+  emitUpdated();
+  return publicState();
+}
+
+// Free-form reorder from drag-and-drop. The caller passes the desired
+// final ordering as an array of IDs. Any IDs missing from `orderedIds`
+// are appended at the end in their existing relative order (defensive
+// — keeps the queue from losing rows if the UI sends a partial list).
+// Running rows are pinned in their current position regardless of
+// what the UI requests.
+function reorderJobs(orderedIds) {
+  if (!Array.isArray(orderedIds)) return publicState();
+  const byId = new Map(state.jobs.map((j) => [j.id, j]));
+  const seen = new Set();
+
+  // Build the new order from orderedIds, respecting running-pin.
+  const next = [];
+  const runningPositions = []; // [{pos, job}] indexed into the new array
+  for (let i = 0; i < state.jobs.length; i++) {
+    if (state.jobs[i].status === STATUS.RUNNING) {
+      runningPositions.push({ originalIndex: i, job: state.jobs[i] });
+      seen.add(state.jobs[i].id);
+    }
+  }
+
+  for (const id of orderedIds) {
+    if (seen.has(id)) continue;
+    const j = byId.get(id);
+    if (!j) continue;
+    if (j.status === STATUS.RUNNING) continue; // pinned, will splice back
+    next.push(j);
+    seen.add(id);
+  }
+  // Append any rows the caller forgot (defensive against partial reorder
+  // payloads that would otherwise drop jobs)
+  for (const j of state.jobs) {
+    if (!seen.has(j.id) && j.status !== STATUS.RUNNING) next.push(j);
+  }
+
+  // Splice running rows back at their original positions.
+  for (const { originalIndex, job } of runningPositions) {
+    const insertAt = Math.min(originalIndex, next.length);
+    next.splice(insertAt, 0, job);
+  }
+
+  state.jobs = next;
+  emitUpdated();
+  return publicState();
+}
 function clearAll() {
   if (state.running) cancel();
   state.jobs = [];
@@ -419,7 +557,13 @@ module.exports = {
   retryFailed,
   clearCompleted,
   clearFailed,
+  clearDone,
   removeJob,
+  removeJobs,
+  duplicateJobs,
+  retryRows,
+  moveJobsTo,
+  reorderJobs,
   clearAll,
   status,
   restoreFromDisk,

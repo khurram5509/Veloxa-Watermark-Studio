@@ -107,8 +107,36 @@ function registerIpcHandlers({ getMainWindow }) {
   ipcMain.handle('engine:retryFailed', () => queue.retryFailed());
   ipcMain.handle('engine:clearCompleted', () => queue.clearCompleted());
   ipcMain.handle('engine:clearFailed', () => queue.clearFailed());
+  ipcMain.handle('engine:clearDone', () => queue.clearDone());
   ipcMain.handle('engine:removeJob', (_e, jobId) => queue.removeJob(jobId));
+  ipcMain.handle('engine:removeJobs', (_e, jobIds) => queue.removeJobs(jobIds));
+  ipcMain.handle('engine:duplicateJobs', (_e, jobIds) => queue.duplicateJobs(jobIds));
+  ipcMain.handle('engine:retryRows', (_e, jobIds) => queue.retryRows(jobIds));
+  ipcMain.handle('engine:moveJobsTo', (_e, jobIds, where) => queue.moveJobsTo(jobIds, where));
+  ipcMain.handle('engine:reorderJobs', (_e, orderedIds) => queue.reorderJobs(orderedIds));
   ipcMain.handle('engine:clearAll', () => queue.clearAll());
+
+  // Destructive — deletes the source files from disk. The renderer is
+  // responsible for the confirm-dialog UX; this handler just performs the
+  // unlink. Failures (file locked, missing, permission denied) are
+  // collected per-path so the UI can show "3 of 5 deleted, 2 errors".
+  // We do NOT touch outputs here — the user's chosen "Delete 1 from Disk"
+  // semantic is "remove the source only; the watermarked PDF stays."
+  ipcMain.handle('engine:deleteSourceFiles', async (_e, paths) => {
+    if (!Array.isArray(paths) || paths.length === 0) return { ok: true, deleted: [], errors: [] };
+    const deleted = [];
+    const errors = [];
+    for (const p of paths) {
+      try {
+        await fsp.unlink(p);
+        deleted.push(p);
+        logger.info(`Deleted source file at user request: ${path.basename(p)}`);
+      } catch (err) {
+        errors.push({ path: p, error: err.message });
+      }
+    }
+    return { ok: errors.length === 0, deleted, errors };
+  });
   ipcMain.handle('engine:status', () => queue.status());
 
   // ---- Logs ----

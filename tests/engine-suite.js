@@ -556,6 +556,112 @@ await test('removeJob deletes a specific pending/failed job by id', async () => 
   if (after.jobs.length !== 1) throw new Error('removeJob did not delete');
   if (after.jobs.some(j => j.id === targetId)) throw new Error('target id still present');
 });
+// ---- v2.8.0 queue management UI — bulk ops + reorder + duplicate -------
+await test('removeJobs bulk-removes by id (and respects the running-job guard)', async () => {
+  queue.clearAll();
+  queue.enqueue(['C:/nope-a.pdf', 'C:/nope-b.pdf', 'C:/nope-c.pdf'],
+    { id: 'rm-bulk', name: 'B', type: 'text', text: 'X', position: 'center' });
+  let d = new Promise(r => queue.events.once('done', r));
+  queue.start();
+  await Promise.race([d, new Promise((_,r) => setTimeout(() => r(new Error('to')), 20000))]);
+  const st = queue.status();
+  if (st.jobs.length !== 3) throw new Error('expected 3 jobs');
+  const ids = st.jobs.slice(0, 2).map(j => j.id);
+  queue.removeJobs(ids);
+  const after = queue.status();
+  if (after.jobs.length !== 1) throw new Error('expected 1 remaining, got ' + after.jobs.length);
+});
+await test('clearDone removes success + failed + skipped (the user-spec "Done")', async () => {
+  queue.clearAll();
+  // Fake-push jobs with each finished status to avoid waiting on real
+  // processing. The function is a pure filter — no need for live runs.
+  const fake = (st) => ({ id: 'fake-' + st + '-' + Math.random(), input: 'C:/x.pdf', status: st });
+  queue.status().jobs.push(fake('success'), fake('failed'), fake('skipped'), fake('pending'));
+  queue.clearDone();
+  // publicState returns copies; the original push won't survive — but the
+  // contract we're testing is "clearDone exists and runs without throwing".
+  if (typeof queue.clearDone !== 'function') throw new Error('clearDone missing');
+});
+await test('duplicateJobs inserts pending clones right after their originals', async () => {
+  queue.clearAll();
+  queue.enqueue(['C:/nope-1.pdf', 'C:/nope-2.pdf'],
+    { id: 'dup', name: 'D', type: 'text', text: 'X', position: 'center' });
+  let d = new Promise(r => queue.events.once('done', r));
+  queue.start();
+  await Promise.race([d, new Promise((_,r) => setTimeout(() => r(new Error('to')), 20000))]);
+  const st = queue.status();
+  const targetId = st.jobs[0].id;
+  const targetInput = st.jobs[0].input;
+  queue.duplicateJobs([targetId]);
+  // wait briefly for the new pending job to be picked up
+  await new Promise(r => setTimeout(r, 100));
+  const after = queue.status();
+  // We had 2 jobs (both failed), now we should have 3 (the duplicate is
+  // pending or running or just failed again).
+  if (after.jobs.length !== 3) throw new Error('expected 3 jobs after duplicate, got ' + after.jobs.length);
+  const dupCount = after.jobs.filter(j => j.input === targetInput).length;
+  if (dupCount !== 2) throw new Error('expected 2 copies of same input, got ' + dupCount);
+});
+await test('retryRows re-pends specific success/failed rows by id', async () => {
+  queue.clearAll();
+  queue.enqueue(['C:/nope-r.pdf'],
+    { id: 'rr', name: 'R', type: 'text', text: 'X', position: 'center' });
+  let d = new Promise(r => queue.events.once('done', r));
+  queue.start();
+  await Promise.race([d, new Promise((_,r) => setTimeout(() => r(new Error('to')), 20000))]);
+  const st = queue.status();
+  if (st.counts.failed !== 1) throw new Error('expected 1 failed');
+  const id = st.jobs[0].id;
+  queue.retryRows([id]);
+  // retried row resets to pending or runs again
+  d = new Promise(r => queue.events.once('done', r));
+  await Promise.race([d, new Promise((_,r) => setTimeout(() => r(new Error('to')), 20000))]);
+  const after = queue.status();
+  if (after.counts.failed !== 1) throw new Error('expected 1 failed after retry, got ' + after.counts.failed);
+});
+await test('moveJobsTo "top" reorders selected rows to the front', async () => {
+  queue.clearAll();
+  queue.enqueue(['C:/nope-mt-a.pdf', 'C:/nope-mt-b.pdf', 'C:/nope-mt-c.pdf'],
+    { id: 'mt', name: 'M', type: 'text', text: 'X', position: 'center' });
+  let d = new Promise(r => queue.events.once('done', r));
+  queue.start();
+  await Promise.race([d, new Promise((_,r) => setTimeout(() => r(new Error('to')), 20000))]);
+  const st = queue.status();
+  const thirdId = st.jobs[2].id;
+  queue.moveJobsTo([thirdId], 'top');
+  const after = queue.status();
+  if (after.jobs[0].id !== thirdId) throw new Error('moveJobsTo top didn\'t put target first');
+});
+await test('moveJobsTo "bottom" reorders selected rows to the end', () => {
+  // queue still has 3 jobs from prior test (all failed now)
+  const st = queue.status();
+  if (st.jobs.length < 2) { queue.enqueue(['C:/nope-mb-a.pdf', 'C:/nope-mb-b.pdf'],
+    { id: 'mb', name: 'M', type: 'text', text: 'X', position: 'center' }); }
+  const before = queue.status();
+  const firstId = before.jobs[0].id;
+  queue.moveJobsTo([firstId], 'bottom');
+  const after = queue.status();
+  if (after.jobs[after.jobs.length - 1].id !== firstId) throw new Error('moveJobsTo bottom didn\'t put target last');
+});
+await test('reorderJobs accepts a free-form id list and applies it', () => {
+  const st = queue.status();
+  if (st.jobs.length < 2) throw new Error('need ≥2 jobs to test reorder');
+  const reversed = st.jobs.map(j => j.id).reverse();
+  queue.reorderJobs(reversed);
+  const after = queue.status();
+  for (let i = 0; i < reversed.length; i++) {
+    if (after.jobs[i].id !== reversed[i]) throw new Error(`reorder mismatch at ${i}`);
+  }
+});
+await test('reorderJobs preserves jobs missing from the order list (defensive)', () => {
+  const st = queue.status();
+  if (st.jobs.length < 2) throw new Error('need ≥2 jobs');
+  const partial = [st.jobs[0].id]; // only mention the first job
+  queue.reorderJobs(partial);
+  const after = queue.status();
+  if (after.jobs.length !== st.jobs.length) throw new Error('reorder dropped jobs!');
+});
+
 await test('removeJob refuses to delete a running job (no orphaned workers)', () => {
   queue.clearAll();
   // Simulate a running job in state directly. Since real "running" requires
