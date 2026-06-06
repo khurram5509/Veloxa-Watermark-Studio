@@ -436,31 +436,54 @@ function snoozeBanner(latestVersion, settingsAdapter, durationMs = 24 * 60 * 60 
 }
 
 /**
- * Download an asset (the Setup .exe) to destPath with optional progress.
+ * Download an asset (the Setup .exe / Mac .zip) to destPath with optional
+ * progress events.
  *
  * Progress callback receives { received, total, percent, bytesPerSec }
  * (bytesPerSec added in v2.6.4 so the UI can show download speed + ETA).
  *
- * Default path is a single HTTPS stream — that turns out to be FASTER on
- * common networks than ranged-parallel against the Azure Blob backend GitHub
- * Releases uses. Benchmarking against the real CDN on a 100 Mbps line:
+ * Adaptive escalation strategy (v2.7.6) — handles two opposing failure
+ * modes that broke earlier hardcoded approaches:
  *
- *   single-stream (1):  6.6 s @ 12.4 MB/s
- *   parallel (6 chunks): 96.6 s @ 0.85 MB/s  ← Azure per-IP throttles +
- *                                              TLS-handshake overhead per
- *                                              chunk dominates.
+ *   - On most networks single-stream is the clear winner. Benchmarking
+ *     against the live Azure Blob CDN on a 100 Mbps line: single-stream
+ *     hit 12.4 MB/s; 6 parallel chunks hit 0.85 MB/s (per-IP throttling
+ *     + per-stream TLS handshake overhead made parallel WORSE).
  *
- * So parallel ranged download is OPT-IN via `parallelChunks > 1`. The path
- * remains available for users on networks where single-stream is throttled
- * lower than aggregate parallel could achieve. Auto-falls-back to single
- * stream if the server returns 200 instead of 206 for a Range request.
+ *   - But on SOME networks (corporate firewalls that QoS-shape per-flow,
+ *     ISPs that throttle long-lived TCP connections, paths where Azure's
+ *     CDN routes return a slow edge), single-stream gets stuck at
+ *     <500 KB/s and the user waits 20+ minutes for an 80 MB installer.
+ *
+ * The fix: start single-stream, sample throughput at SPEED_SAMPLE_MS, and
+ * if it's below SPEED_THRESHOLD_BPS, abort and restart with parallel
+ * ranged. Worst case the user "wastes" 5 seconds of slow download before
+ * the switch; from then on parallel takes over and pulls the rest at the
+ * aggregate throughput several connections can muster.
+ *
+ * Callers can override the adaptive path with explicit options:
+ *   parallelChunks > 1       → skip the sample, start parallel immediately
+ *   adaptive: false          → stay single-stream forever (legacy mode)
+ *
+ * Auto-falls-back to single-stream if the server returns 200 instead of
+ * 206 for a Range request (very rare for Azure Blob / S3).
  */
+
+const SPEED_SAMPLE_MS = 5000;          // sample throughput after 5 s
+const SPEED_THRESHOLD_BPS = 500_000;   // <500 KB/s → escalate to parallel
+const DEFAULT_PARALLEL_CHUNKS = 4;     // chunks for the escalation path
+
 async function downloadAsset(url, destPath, opts = {}) {
   const {
     onProgress, timeoutMs = 120000, expectedSize = null,
-    parallelChunks = 1, maxRetries = 2,
+    parallelChunks = 1,
+    adaptive = true,
+    maxRetries = 2,
+    sampleMs = SPEED_SAMPLE_MS,
+    thresholdBps = SPEED_THRESHOLD_BPS,
   } = opts;
 
+  // ---- Explicit-parallel path: caller forced it via parallelChunks > 1 ----
   if (parallelChunks > 1 && expectedSize && expectedSize > 4 * 1024 * 1024) {
     try {
       return await downloadParallelRanged(url, destPath, {
@@ -472,7 +495,83 @@ async function downloadAsset(url, destPath, opts = {}) {
       }
     }
   }
+
+  // ---- Adaptive path: start single, watch throughput, escalate if slow ----
+  // Only adaptive when (a) the caller asked for it (default true),
+  // (b) we know the total size (otherwise we can't ranged-split), and
+  // (c) the file is big enough to matter (<4 MB downloads in <2 s anyway).
+  if (adaptive && expectedSize && expectedSize > 4 * 1024 * 1024) {
+    return downloadAdaptive(url, destPath, {
+      onProgress, timeoutMs, expectedSize, maxRetries, sampleMs, thresholdBps,
+    });
+  }
+
   return downloadSingleStream(url, destPath, { onProgress, timeoutMs, expectedSize });
+}
+
+/**
+ * Start single-stream. At sampleMs, if average throughput is below
+ * thresholdBps, abort + restart with parallel-ranged (DEFAULT_PARALLEL_CHUNKS).
+ *
+ * The escalation is one-shot: once we restart parallel we don't keep
+ * watching. If parallel is ALSO slow there's nothing left to try — the
+ * bottleneck is the user's actual link capacity, not the server's per-flow
+ * throttling.
+ */
+async function downloadAdaptive(url, destPath, opts) {
+  const {
+    onProgress, timeoutMs, expectedSize, maxRetries, sampleMs, thresholdBps,
+  } = opts;
+
+  let aborted = false;
+  let abortHandle = null;
+
+  // Wrap the user's onProgress so we can both forward AND watch the rate.
+  // If throughput at the sample point is below threshold, set `aborted=true`
+  // and signal the single-stream code to bail via the controller it owns.
+  const sampleAt = Date.now() + sampleMs;
+  let sampleFired = false;
+  function progressWatcher(p) {
+    if (!sampleFired && Date.now() >= sampleAt) {
+      sampleFired = true;
+      if (p.bytesPerSec && p.bytesPerSec < thresholdBps && p.percent < 0.95) {
+        // Slow — escalate. The destroy() call on the http request below
+        // will cause downloadSingleStream's `fail()` path to clean up the
+        // .partial. We then run downloadParallelRanged from scratch.
+        aborted = true;
+        if (abortHandle && abortHandle.req) {
+          try { abortHandle.req.destroy(new Error('VELOXA_ADAPTIVE_SLOW')); } catch {}
+        }
+      }
+    }
+    if (onProgress) onProgress(p);
+  }
+
+  try {
+    return await downloadSingleStream(url, destPath, {
+      onProgress: progressWatcher,
+      timeoutMs,
+      expectedSize,
+      _abortHandleRef: (h) => { abortHandle = h; },
+    });
+  } catch (err) {
+    // If we aborted because the speed was below threshold, escalate to
+    // parallel-ranged. Any OTHER error (real network failure, timeout,
+    // size mismatch) bubbles up so the UI shows the right message.
+    if (aborted && /VELOXA_ADAPTIVE_SLOW|aborted|destroyed/i.test(err.message)) {
+      if (process.env.VELOXA_DEBUG_UPDATER) {
+        console.warn('Adaptive download: single-stream <500 KB/s, escalating to parallel');
+      }
+      return downloadParallelRanged(url, destPath, {
+        onProgress,
+        timeoutMs,
+        expectedSize,
+        parallelChunks: DEFAULT_PARALLEL_CHUNKS,
+        maxRetries,
+      });
+    }
+    throw err;
+  }
 }
 
 /**
@@ -634,7 +733,13 @@ function downloadOneRange(url, partialPath, start, end, onBytes, timeoutMs, infl
 
 // Legacy single-stream download — kept as fallback when Range isn't honored
 // or when the caller passes parallelChunks <= 1 or doesn't know the size.
-function downloadSingleStream(url, destPath, { onProgress, timeoutMs = 60000, expectedSize = null } = {}) {
+//
+// `_abortHandleRef` (private) lets the adaptive wrapper get a handle on the
+// active http request so it can call .destroy() when throughput is below the
+// escalation threshold. Without this hook the adaptive code couldn't cancel
+// the slow stream and would have to wait for it to finish — defeating the
+// whole point of the watchdog.
+function downloadSingleStream(url, destPath, { onProgress, timeoutMs = 60000, expectedSize = null, _abortHandleRef = null } = {}) {
   return new Promise((resolve, reject) => {
     const partial = destPath + '.partial';
     let u;
@@ -724,6 +829,11 @@ function downloadSingleStream(url, destPath, { onProgress, timeoutMs = 60000, ex
       });
       req.setTimeout(timeoutMs, () => req.destroy(new Error('Download timeout')));
       req.on('error', fail);
+      // Surface the request handle so the adaptive wrapper can call
+      // .destroy() to abort the stream early when throughput is below the
+      // escalation threshold. Updated on every redirect hop so we cancel
+      // the currently-active request, not a stale one.
+      if (_abortHandleRef) _abortHandleRef({ req });
       req.end();
     };
     fetchWithRedirects(u.toString());
