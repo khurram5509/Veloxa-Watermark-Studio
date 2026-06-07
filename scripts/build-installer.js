@@ -1,14 +1,27 @@
 #!/usr/bin/env node
 /**
  * One-shot installer build:
- *   1. Locate Inno Setup's ISCC.exe (or fail with install instructions)
- *   2. Compile scripts/installer.iss → %TEMP%\veloxa-installer-build\
- *   3. Move the resulting setup .exe into release/
+ *   1. Run vite to produce dist/ (renderer bundle)
+ *   2. Run @electron/packager to produce a fresh
+ *      release/Veloxa Watermark Studio-win32-x64/ from current source
+ *   3. Locate Inno Setup's ISCC.exe (or fail with install instructions)
+ *   4. Compile scripts/installer.iss → %TEMP%\veloxa-installer-build\
+ *   5. Move the resulting setup .exe into release/
  *
- * Prerequisites: the packaged Electron app must already exist at
- * release/Veloxa Watermark Studio-win32-x64/ (run @electron/packager first).
+ * CRITICAL: steps 1 and 2 used to be the caller's responsibility — and were
+ * routinely skipped. The result: every installer built between June 5 and
+ * v2.8.2 wrapped Inno around the same v2.7.5-era app.asar, with only the
+ * outer Inno metadata reflecting the new version number. Users installed
+ * "v2.8.2" but actually got v2.7.5 code with a v2.8.2 stamp — explaining
+ * the persistent "title bar shows v2.4.1 after install" complaints, plus
+ * the install crashes that motivated this fix.
+ *
+ * From v2.8.3 onwards `npm run installer` re-runs the full chain so the
+ * installer ALWAYS contains the latest source.
  *
  * Usage:  node scripts/build-installer.js   (or `npm run installer`)
+ *   --skip-vite      Skip step 1 (use existing dist/)
+ *   --skip-package   Skip step 2 (use existing packaged dir)
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -22,6 +35,10 @@ const packagedDir = path.join(releaseDir, 'Veloxa Watermark Studio-win32-x64');
 const version = require(path.join(projectRoot, 'package.json')).version;
 const setupName = `VeloxaWatermarkStudio-Setup-${version}.exe`;
 const tempBuildDir = path.join(os.tmpdir(), 'veloxa-installer-build');
+
+const args = new Set(process.argv.slice(2));
+const skipVite = args.has('--skip-vite');
+const skipPackage = args.has('--skip-package');
 
 function findISCC() {
   const candidates = [
@@ -45,13 +62,86 @@ function bail(msg) {
 console.log(`Veloxa installer builder — v${version}`);
 console.log('');
 
-if (!fs.existsSync(packagedDir)) {
-  bail(
-    `Packaged app not found at:\n   ${packagedDir}\n\n` +
-    'Run the packager first:\n' +
-    '   npx @electron/packager . "Veloxa Watermark Studio" --platform=win32 --arch=x64 --out=release --overwrite --asar --icon=build/icon.ico',
-  );
+// ---- Step 1: vite build (renderer) ----
+if (!skipVite) {
+  console.log('▸ Step 1/3: vite build (renderer bundle)');
+  const vite = spawnSync('npm', ['run', 'build'], {
+    cwd: projectRoot, stdio: 'inherit', shell: true,
+  });
+  if (vite.status !== 0) bail('vite build failed');
+  console.log('✔ Renderer bundle ready in dist/');
+  console.log('');
 }
+
+// ---- Step 2: @electron/packager (refresh the packaged app) ----
+// CRITICAL: this is what was missing for ~2 months of releases. Without
+// this re-packaging step, the installer just keeps wrapping Inno around
+// whatever app.asar happened to be in the packagedDir on June 5, regardless
+// of what the source code says.
+if (!skipPackage) {
+  console.log('▸ Step 2/3: @electron/packager (refresh win32-x64 from current source)');
+  // Use the Node API directly — the CLI suffers from cmd.exe argument
+  // escaping issues with our project's spaces in the path (e.g. "0 AI").
+  (async () => {
+    try {
+      // Clean the old packaged dir first so stale files can't leak in.
+      try { fs.rmSync(packagedDir, { recursive: true, force: true }); } catch {}
+
+      const packager = require('@electron/packager');
+      const fn = packager.packager || packager.default || packager;
+      const PACKAGER_IGNORES = [
+        /^\/release(\/|$)/,
+        /^\/tests(\/|$)/,
+        /^\/scripts(\/|$)/,
+        /^\/src(\/|$)/,
+        /^\/\.git(\/|$)/,
+        /^\/\.claude(\/|$)/,
+        /^\/\.vscode(\/|$)/,
+        /^\/INSTALL\.md$/,
+        /^\/README\.md$/,
+        /^\/\.gitignore$/,
+        /^\/\.gitattributes$/,
+        /^\/postcss\.config\.js$/,
+        /^\/tailwind\.config\.js$/,
+        /^\/vite\.config\.js$/,
+        /^\/index\.html$/,
+        /\.tmp(\.|$)/,
+        /^\/\.npmrc$/,
+      ];
+
+      const result = await fn({
+        dir: projectRoot,
+        name: 'Veloxa Watermark Studio',
+        platform: 'win32',
+        arch: 'x64',
+        out: releaseDir,
+        overwrite: true,
+        asar: true,
+        prune: true,
+        icon: path.join(projectRoot, 'build', 'icon.ico'),
+        ignore: PACKAGER_IGNORES,
+      });
+      const outDir = Array.isArray(result) ? result[0] : result;
+      console.log(`✔ Packaged app: ${outDir}`);
+      console.log('');
+      runInno();
+    } catch (err) {
+      bail(`Packager failed: ${err.message}`);
+    }
+  })();
+} else {
+  console.log('▸ Step 2/3: SKIPPED (--skip-package)');
+  console.log('');
+  runInno();
+}
+
+function runInno() {
+  if (!fs.existsSync(packagedDir)) {
+    bail(
+      `Packaged app not found at:\n   ${packagedDir}\n\n` +
+      'Run the packager first or remove --skip-package.',
+    );
+  }
 if (!fs.existsSync(issPath)) {
   bail(`Installer script not found: ${issPath}`);
 }
@@ -135,3 +225,4 @@ async function safePublish(src, dst) {
   console.log(`✔ Installer ready (${sizeMb} MB):`);
   console.log(`   ${written}`);
 })().catch((err) => bail(err.message || String(err)));
+} // end runInno
